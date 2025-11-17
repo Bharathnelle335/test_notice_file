@@ -47,34 +47,6 @@
     },
     {
       "type": "library",
-      "name": "pkg:github/xen-project/xen",
-      "version": "unknown",
-      "bom-ref": "BomRef.92jcou4b6j8.fb9jm5rcc3g",
-      "publisher": "xen-project",
-      "licenses": [
-        {
-          "license": {
-            "id": "MIT",
-            "acknowledgement": "declared"
-          }
-        },
-        {
-          "license": {
-            "id": "MIT",
-            "acknowledgement": "concluded"
-          }
-        }
-      ],
-      "purl": "pkg:github/xen-project/xen",
-      "externalReferences": [
-        {
-          "url": "https://github.com/xen-project/xen",
-          "type": "website"
-        }
-      ]
-    },
-    {
-      "type": "library",
       "name": "pkg:github/nanovms/nanos",
       "version": "0.1.54",
       "bom-ref": "BomRef.utg6fl2g0eg.mhrdg16upl8",
