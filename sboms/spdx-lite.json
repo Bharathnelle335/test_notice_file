@@ -38,31 +38,6 @@
                     "checksumValue": "00000000000000000000000000000000"
                 }
             ]
-        },
-                {
-            "name": "pkg:github/xen-project/xen",
-            "SPDXID": "SPDXRef-72462888c2d641f382f3d623aed68466",
-            "versionInfo": "unknown",
-            "downloadLocation": "https://github.com/xen-project/xen",
-            "filesAnalyzed": false,
-            "supplier": "Organization: xen-project",
-            "homepage": "https://github.com/xen-project/xen",
-            "licenseDeclared": "MIT",
-            "licenseConcluded": "MIT",
-            "copyrightText": "NOASSERTION",
-            "externalRefs": [
-                {
-                    "referenceCategory": "PACKAGE_MANAGER",
-                    "referenceLocator": "pkg:github/xen-project/xen",
-                    "referenceType": "purl"
-                }
-            ],
-            "checksums": [
-                {
-                    "algorithm": "MD5",
-                    "checksumValue": "00000000000000000000000000000000"
-                }
-            ]
         }
     ],
     "documentDescribes": [
