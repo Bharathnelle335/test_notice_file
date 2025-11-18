@@ -468,15 +468,7 @@ jobs:
               print(f"FATAL: cannot read artifacts/components.json: {e}")
               sys.exit(1)
 
-          agg = {}
-          try:
-              with open("artifacts/component_copyrights.json", "r", encoding="utf-8") as f:
-                  agg_data = json.load(f)
-              for c in (agg_data.get("components") or []):
-                  agg[c.get("component")] = c
-          except Exception as e:
-              print(f"WARNING: cannot read aggregated JSON, will use raw only: {e}")
-
+          # Build YAML from RAW only (to keep in sync with TXT behavior)
           def load_raw(component_name):
               p = os.path.join("scancode_results", sanitize(component_name) + ".json")
               if os.path.exists(p):
@@ -489,15 +481,16 @@ jobs:
                   print(f"INFO: raw JSON not found for {component_name}: {p}")
               return None
 
-          def top_spdx_license_from_data(data):
+          def top_spdx_from_raw(data):
+              if not data: return None
               counts = {}
               def bump(key):
                   if not key: return
                   k = key.strip()
-                  if k:
-                      counts[k] = counts.get(k, 0) + 1
-              if not data:
-                  return None
+                  if not k: return
+                  if k.startswith("(") and k.endswith(")"):
+                      k = k[1:-1].strip()
+                  counts[k] = counts.get(k, 0) + 1
               for fe in data.get("files", []) or []:
                   bump(fe.get("detected_license_expression_spdx"))
                   for det in fe.get("license_detections", []) or []:
@@ -506,36 +499,17 @@ jobs:
                       bump(lic.get("spdx_license_key"))
               for det in data.get("license_detections", []) or []:
                   bump(det.get("license_expression_spdx"))
-              if not counts: 
-                  return None
+              if not counts: return None
               return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
 
-          def top_spdx_license_from_agg(agg_entry):
-              counts = {}
-              if not agg_entry:
-                  return None
-              for k in agg_entry.get("licenses", {}).get("unique_keys", []) or []:
-                  if k:
-                      counts[k] = counts.get(k, 0) + 1
-              if not counts:
-                  return None
-              return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
-
-          def collect_copyrights_from_data(data):
+          def copyrights_from_raw(data):
+              if not data: return []
               out = set()
-              if not data:
-                  return []
               for fe in data.get("files", []) or []:
                   for c in fe.get("copyrights", []) or []:
-                      val = (c.get("copyright") or "").strip()
-                      if val:
-                          out.add(val)
+                      v = (c.get("copyright") or "").strip()
+                      if v: out.add(v)
               return sorted(out)
-
-          def collect_copyrights_from_agg(agg_entry):
-              if not agg_entry:
-                  return []
-              return list(agg_entry.get("copyrights", {}).get("unique_statements", []))
 
           entries = []
           for comp in components:
@@ -544,10 +518,8 @@ jobs:
               url = comp.get("git_url")
 
               raw = load_raw(name)
-              agg_entry = agg.get(name)
-
-              primary_spdx = top_spdx_license_from_data(raw) or top_spdx_license_from_agg(agg_entry)
-              copyrights = collect_copyrights_from_data(raw) or collect_copyrights_from_agg(agg_entry)
+              primary_spdx = top_spdx_from_raw(raw)
+              copyrights = copyrights_from_raw(raw)
 
               entries.append({
                   "component": name,
@@ -571,43 +543,86 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Build per-component attribution file (TXT, line-by-line)
+      - name: Build per-component attribution file (TXT, line-by-line) — RAW ONLY
         run: |
           set -euo pipefail
           python - << 'PY'
           import json, os, sys, re
 
-          # Load aggregated JSON produced earlier
+          # Use components list to know which raw files to read
           try:
-              with open("artifacts/component_copyrights.json", "r", encoding="utf-8") as f:
-                  agg = json.load(f)
+              with open("artifacts/components.json", "r", encoding="utf-8") as f:
+                  components = json.load(f).get("components", [])
           except Exception as e:
-              print(f"FATAL: cannot read aggregated JSON: {e}")
+              print(f"FATAL: cannot read artifacts/components.json: {e}")
               sys.exit(1)
 
-          comps = agg.get("components", [])
+          def sanitize(s):
+              return re.sub(r'[^A-Za-z0-9_.-]+', '-', (s or "")).strip('-') or "unknown"
+
+          def load_raw(component_name):
+              p = os.path.join("scancode_results", sanitize(component_name) + ".json")
+              if os.path.exists(p):
+                  try:
+                      with open(p, "r", encoding="utf-8") as f:
+                          return json.load(f)
+                  except Exception as e:
+                      print(f"WARNING: failed to parse raw JSON for {component_name}: {e}")
+              else:
+                  print(f"INFO: raw JSON not found for {component_name}: {p}")
+              return None
+
+          def top_spdx_from_raw(data):
+              if not data: return None
+              counts = {}
+              def bump(key):
+                  if not key: return
+                  k = key.strip()
+                  if not k: return
+                  if k.startswith("(") and k.endswith(")"):
+                      k = k[1:-1].strip()
+                  counts[k] = counts.get(k, 0) + 1
+              for fe in data.get("files", []) or []:
+                  bump(fe.get("detected_license_expression_spdx"))
+                  for det in fe.get("license_detections", []) or []:
+                      bump(det.get("license_expression_spdx"))
+                  for lic in fe.get("licenses", []) or []:
+                      bump(lic.get("spdx_license_key"))
+              for det in data.get("license_detections", []) or []:
+                  bump(det.get("license_expression_spdx"))
+              if not counts: return None
+              return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
+
+          def copyrights_from_raw(data):
+              if not data: return []
+              out = set()
+              for fe in data.get("files", []) or []:
+                  for c in fe.get("copyrights", []) or []:
+                      v = (c.get("copyright") or "").strip()
+                      if v: out.add(v)
+              return sorted(out)
+
           lines = []
-          for c in comps:
-              name = c.get("component") or ""
-              version = c.get("version")
-              url = c.get("git_url") or ""
-              # primary license = first of unique_keys if present
-              keys = c.get("licenses", {}).get("unique_keys", []) or []
-              license_str = keys[0] if keys else ""
+          for comp in components:
+              name = comp.get("component") or ""
+              version = comp.get("version")
+              url = comp.get("git_url") or ""
+
+              raw = load_raw(name)
+
+              spdx = top_spdx_from_raw(raw) or ""
+              cps = copyrights_from_raw(raw)
 
               lines.append(f"Component: {name}")
               if version:
                   lines.append(f"Version: {version}")
               lines.append(f"URL: {url}")
-              lines.append(f"License: {license_str}")
-              lines.append("Copyrights:")
+              lines.append(f"License: {spdx}")
 
-              cps = c.get("copyrights", {}).get("unique_statements", []) or []
+              lines.append("Copyrights:")
               if cps:
                   for stmt in cps:
-                      # normalize angle braces to readable form
-                      stmt = re.sub(r'<', '&lt;', stmt)
-                      stmt = re.sub(r'>', '&gt;', stmt)
+                      stmt = stmt.replace("<", "&lt;").replace(">", "&gt;")
                       lines.append(f"- {stmt}")
               else:
                   lines.append("- (none)")
@@ -618,7 +633,7 @@ jobs:
           out_txt = "artifacts/component_attribution.txt"
           with open(out_txt, "w", encoding="utf-8") as f:
               f.write("\n".join(lines).rstrip() + "\n")
-          print(f"Wrote {out_txt} with {len(comps)} components.")
+          print(f"Wrote {out_txt} with {len(components)} components.")
           PY
 
       - name: Upload per-component attribution (TXT)
