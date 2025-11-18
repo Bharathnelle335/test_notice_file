@@ -1,3 +1,4 @@
+
 import json, os
 from pathlib import Path
 
@@ -7,14 +8,17 @@ rows = []
 license_texts = {}
 
 # Each unpacked directory contains scan.json + meta.json
-for p in scans_dir.glob("*/*/scan.json"):
+for p in scans_dir.glob("**/scan.json"):
     meta = p.parent / "meta.json"
     data = json.loads(p.read_text(encoding="utf-8"))
     meta_d = {}
     if meta.exists():
         meta_d = json.loads(meta.read_text(encoding="utf-8"))
 
-    name = meta_d.get("name") or p.parent.name
+    # Extract component name and simplify to last part after '/'
+    raw_name = meta_d.get("name") or p.parent.name
+    name = raw_name.split("/")[-1] if raw_name else ""
+
     version = meta_d.get("version") or ""
     url = meta_d.get("url") or ""
     lic = meta_d.get("license") or ""
@@ -50,7 +54,8 @@ for p in scans_dir.glob("*/*/scan.json"):
         "version": version,
         "url": url,
         "license": lic,
-        "copyright": "\n".join(cps_u)  # <-- All copyrights included
+        "copyright": "
+".join(cps_u)  # Include all copyrights
     })
 
     for k, v in ltexts.items():
@@ -58,23 +63,37 @@ for p in scans_dir.glob("*/*/scan.json"):
 
 # Build NOTICE.md
 out = []
-out.append(f"# {title}\n")
+out.append(f"# {title}
+")
 for r in rows:
-    out.append(f"### {r['name']}" + (f" {r['version']}" if r.get('version') else ""))
+    line = f"{r['name']}"
+    if r.get('version'):
+        line += f" {r['version']}"
+    out.append(line)
     if r.get("url"):
-        out.append(f"- **URL:** {r['url']}")
+        out.append(f"URL: {r['url']}")
     if r.get("license"):
-        out.append(f"- **License:** {r['license']}")
+        out.append(f"License: {r['license']}")
     if r.get("copyright"):
-        out.append(f"- **Copyright:** {r['copyright']}")
+        out.append(f"Copyright:
+{r['copyright']}")
     out.append("")
 
 if license_texts:
-    out.append("\n## License Texts\n")
+    out.append("
+## License Texts
+")
     for lid, text in sorted(license_texts.items()):
-        out.append(f"### {lid}\n```text\n{text.strip()}\n```\n")
+        out.append(f"### {lid}
+```text
+{text.strip()}
+```
+")
 
-Path("NOTICE.md").write_text(("\n".join(out)).rstrip() + "\n", encoding="utf-8")
+Path("NOTICE.md").write_text(("
+".join(out)).rstrip() + "
+", encoding="utf-8")
 
 with open(os.environ.get("GITHUB_OUTPUT", "github_output.txt"), "a") as gh:
-    gh.write(f"count={len(rows)}\n")
+    gh.write(f"count={len(rows)}
+")
