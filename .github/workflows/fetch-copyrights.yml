@@ -2,15 +2,6 @@ name: Extract components & fetch copyrights
 
 on:
   workflow_dispatch:
-    inputs:
-      spdx_path:
-        description: "Path to SPDX-Lite JSON"
-        required: false
-        default: "sboms/spdx-lite.json"
-      cdx_path:
-        description: "Path to CycloneDX JSON"
-        required: false
-        default: "sboms/cyclonedx.json"
   push:
     branches: [ main, master ]
   pull_request:
@@ -18,13 +9,8 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: scancode-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   build-and-scan:
-    name: Parse BOMs → Generate components.json → Scan with ScanCode
     runs-on: ubuntu-latest
     timeout-minutes: 120
 
@@ -33,321 +19,168 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Validate SBOM files exist
-        env:
-          SPDX_PATH: ${{ inputs.spdx_path || 'sboms/spdx-lite.json' }}
-          CDX_PATH:  ${{ inputs.cdx_path  || 'sboms/cyclonedx.json' }}
         run: |
           set -euo pipefail
-          echo "Checking: $SPDX_PATH and $CDX_PATH"
-          test -f "$SPDX_PATH" || { echo "Missing $SPDX_PATH" >&2; exit 1; }
-          test -f "$CDX_PATH"  || { echo "Missing $CDX_PATH" >&2; exit 1; }
+          test -f "sboms/spdx-lite.json" || { echo "Missing sboms/spdx-lite.json" >&2; exit 1; }
+          test -f "sboms/cyclonedx.json" || { echo "Missing sboms/cyclonedx.json" >&2; exit 1; }
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install utilities (jq, tar, git lfs)
+      - name: Install utilities
         run: |
           sudo apt-get update
-          sudo apt-get install -y jq xz-utils git-lfs
+          sudo apt-get install -y git-lfs xz-utils
           git lfs install
 
-      - name: Generate components.json from SPDX-Lite & CycloneDX
-        id: gen_components
-        env:
-          SPDX_PATH: ${{ inputs.spdx_path || 'sboms/spdx-lite.json' }}
-          CDX_PATH:  ${{ inputs.cdx_path  || 'sboms/cyclonedx.json' }}
-        shell: bash
+      - name: Generate components.json from SBOMs
         run: |
           set -euo pipefail
-          echo "Using SPDX JSON: ${SPDX_PATH}"
-          echo "Using CycloneDX JSON: ${CDX_PATH}"
-
           python - << 'PY'
           import json, os, re, urllib.parse
 
-          SPDX_PATH = os.environ.get("SPDX_PATH", "sboms/spdx-lite.json")
-          CDX_PATH  = os.environ.get("CDX_PATH", "sboms/cyclonedx.json")
+          SPDX_PATH = "sboms/spdx-lite.json"
+          CDX_PATH  = "sboms/cyclonedx.json"
 
           def load_json(path):
-              if not os.path.exists(path):
-                  return None
-              with open(path, 'r', encoding='utf-8') as f:
-                  return json.load(f)
+              if not os.path.exists(path): return None
+              with open(path, 'r', encoding='utf-8') as f: return json.load(f)
 
           def extract_from_purl(purl):
-              if not purl:
-                  return (None, None, None)
+              if not purl: return (None, None, None)
               s = purl.strip()
-              if s.startswith("pkg:"):
-                  s = s[4:]
-              s = s.split('#', 1)[0]
-              s = s.split('?', 1)[0]
+              if s.startswith("pkg:"): s = s[4:]
+              s = s.split('#', 1)[0].split('?', 1)[0]
               version = None
               base = s
-              if '@' in s:
-                  base, version = s.rsplit('@', 1)
-              last = base.split('/')[-1]
-              component = urllib.parse.unquote(last)
-              m = re.search(r'(github\.com|gitlab\.com|bitbucket\.org)/([^/?#]+)/([^/?#]+)', base)
+              if '@' in s: base, version = s.rsplit('@', 1)
+              component = urllib.parse.unquote(base.split('/')[-1])
               git_url = None
+              m = re.search(r'(github\.com|gitlab\.com|bitbucket\.org)/([^/?#]+)/([^/?#]+)', base)
               if m:
                   host, owner, repo = m.groups()
-                  repo = repo.rstrip('.git')
-                  git_url = f"https://{host}/{owner}/{repo}.git"
+                  git_url = f"https://{host}/{owner}/{repo.rstrip('.git')}.git"
               return (component, version, git_url)
-
-          def is_git_like(url):
-              if not url:
-                  return False
-              return any(k in url for k in ["git@", "git://", "github.com", "gitlab.com", "bitbucket.org", ".git"])
-
-          def best_git_url(spdx_pkg, cdx_comp, purl):
-              if cdx_comp:
-                  for ref in cdx_comp.get("externalReferences", []) or []:
-                      rtype = (ref.get("type") or "").lower()
-                      url = ref.get("url") or ref.get("locator") or ""
-                      if rtype in {"vcs", "repository", "scm", "source"} and is_git_like(url):
-                          return url
-                      if is_git_like(url):
-                          return url
-                  url = cdx_comp.get("repository") or ""
-                  if is_git_like(url):
-                      return url
-              if spdx_pkg:
-                  for ref in spdx_pkg.get("externalRefs", []) or []:
-                      rtype = (ref.get("referenceType") or ref.get("type") or "").lower()
-                      loc = ref.get("referenceLocator") or ref.get("locator") or ""
-                      if rtype in {"vcs", "vcs-url", "repository", "scm"} and is_git_like(loc):
-                          return loc
-                      if is_git_like(loc):
-                          return loc
-                  dl = spdx_pkg.get("downloadLocation") or ""
-                  if is_git_like(dl):
-                      return dl
-                  hp = spdx_pkg.get("homepage") or ""
-                  if is_git_like(hp):
-                      return hp
-              comp, ver, inferred = extract_from_purl(purl) if purl else (None, None, None)
-              return inferred
-
-          def last_segment_from_name(name):
-              if not name:
-                  return None
-              for sep in ('/', ':'):
-                  if sep in name:
-                      name = name.split(sep)[-1]
-              return name
 
           def parse_cyclonedx(path):
               out = []
               data = load_json(path)
-              if not data:
-                  return out
-              comps = data.get("components") or []
-              for c in comps:
+              if not data: return out
+              for c in data.get("components", []):
                   purl = c.get("purl")
-                  name_from_purl, version_from_purl, inferred_git = extract_from_purl(purl) if purl else (None, None, None)
-                  name = name_from_purl or last_segment_from_name(c.get("name"))
-                  version = c.get("version") or version_from_purl
-                  git_url = best_git_url(None, c, purl) or inferred_git
-                  if name:
-                      out.append({"component": name, "version": version, "git_url": git_url, "source": "cyclonedx"})
+                  name, ver, git_url = extract_from_purl(purl)
+                  if not name: name = c.get("name")
+                  if not ver: ver = c.get("version")
+                  out.append({"component": name, "version": ver, "git_url": git_url})
               return out
 
           def parse_spdx(path):
               out = []
               data = load_json(path)
-              if not data:
-                  return out
-              pkgs = data.get("packages") or data.get("Packages") or []
-              for p in pkgs:
-                  name = last_segment_from_name(p.get("name") or p.get("packageName"))
-                  version = p.get("versionInfo")
+              if not data: return out
+              for p in data.get("packages", []):
+                  name = p.get("name") or p.get("packageName")
+                  ver = p.get("versionInfo")
                   purl = None
-                  for ref in p.get("externalRefs", []) or []:
-                      rtype = (ref.get("referenceType") or ref.get("type") or "").lower()
-                      loc = ref.get("referenceLocator") or ref.get("locator") or ""
-                      if rtype == "purl":
-                          purl = loc
+                  for ref in p.get("externalRefs", []):
+                      if (ref.get("referenceType") or "").lower() == "purl":
+                          purl = ref.get("referenceLocator")
                           break
-                  name_from_purl, version_from_purl, inferred_git = extract_from_purl(purl) if purl else (None, None, None)
-                  if name_from_purl:
-                      name = name_from_purl
-                  if not version:
-                      version = version_from_purl
-                  git_url = best_git_url(p, None, purl) or inferred_git
-                  if name:
-                      out.append({"component": name, "version": version, "git_url": git_url, "source": "spdx"})
+                  name2, ver2, git_url = extract_from_purl(purl)
+                  if name2: name = name2
+                  if not ver: ver = ver2
+                  out.append({"component": name, "version": ver, "git_url": git_url})
               return out
 
-          cdx_items = parse_cyclonedx(CDX_PATH)
-          spdx_items = parse_spdx(SPDX_PATH)
-
-          seen = set()
-          result = []
-          for item in cdx_items + spdx_items:
-              key = (item["component"], item.get("version") or "", item.get("git_url") or "")
-              if key in seen:
-                  continue
+          comps = parse_cyclonedx(CDX_PATH) + parse_spdx(SPDX_PATH)
+          seen, result = set(), []
+          for c in comps:
+              key = (c["component"], c.get("version") or "", c.get("git_url") or "")
+              if key in seen: continue
               seen.add(key)
-              git_url = item.get("git_url")
-              if git_url and git_url.startswith("http") and any(h in git_url for h in ["github.com","gitlab.com","bitbucket.org"]) and not git_url.endswith(".git"):
-                  git_url = git_url.rstrip("/") + ".git"
-              result.append({
-                  "component": item["component"],
-                  "version": item.get("version"),
-                  "git_url": git_url
-              })
+              result.append(c)
 
           os.makedirs("artifacts", exist_ok=True)
-          with open("artifacts/components.json", "w", encoding="utf-8") as f:
-              json.dump({"components": result}, f, indent=2, ensure_ascii=False)
-
-          print(f"Wrote artifacts/components.json with {len(result)} entries.")
+          with open("artifacts/components.json", "w") as f:
+              json.dump({"components": result}, f, indent=2)
+          print(f"Wrote {len(result)} components.")
           PY
 
-      - name: Upload components.json artifact
+      - name: Upload components.json
         uses: actions/upload-artifact@v4
         with:
           name: components-json
           path: artifacts/components.json
-          if-no-files-found: error
-          retention-days: 14
 
-      - name: Install latest ScanCode Toolkit (linux_64)
-        id: install_scancode
-        shell: bash
+      - name: Install ScanCode Toolkit (latest stable)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           mkdir -p scancode && cd scancode
-          REL_JSON=$(curl -s https://api.github.com/repos/nexB/scancode-toolkit/releases/latest)
-          ASSET_URL=$(echo "$REL_JSON" | jq -r '.assets[] | select(.name | test("linux_64\\.tar\\.xz$")) | .browser_download_url' | head -n 1)
-          if [ -z "$ASSET_URL" ] || [ "$ASSET_URL" = "null" ]; then
-            echo "Could not find linux_64 tarball in latest release assets." >&2
-            exit 1
-          fi
+          REL_JSON=$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/nexB/scancode-toolkit/releases/latest)
+          ASSET_URL=$(echo "$REL_JSON" | grep -o '"browser_download_url": *"[^"]*"' \
+            | grep -E 'linux(_|-)?x86_64.*\.tar\.xz|linux_64.*\.tar\.xz' \
+            | head -n 1 | sed 's/"browser_download_url": *"//;s/"$//')
+          if [ -z "$ASSET_URL" ]; then echo "No ScanCode asset found." >&2; exit 1; fi
           echo "Downloading: $ASSET_URL"
-          curl -L "$ASSET_URL" -o scancode.tar.xz
+          curl -fsSL "$ASSET_URL" -o scancode.tar.xz
           tar -xf scancode.tar.xz
           SCANCODE_DIR=$(ls -d scancode-toolkit-* | head -n 1)
-          echo "SCANCODE=$PWD/$SCANCODE_DIR/scancode" >> $GITHUB_ENV
-          echo "SCANCODE_DIR=$PWD/$SCANCODE_DIR" >> $GITHUB_ENV
-          echo "Installed ScanCode at $SCANCODE_DIR"
+          echo "SCANCODE=$PWD/$SCANCODE_DIR/scancode" >> "$GITHUB_ENV"
 
-      - name: Clone repos and run ScanCode (copyright only)
+      - name: Clone repos and run ScanCode
         env:
           SCANCODE: ${{ env.SCANCODE }}
-        shell: bash
         run: |
           set -euo pipefail
           python - << 'PY'
-          import json, os, subprocess, re, shlex
-
+          import json, os, subprocess, shlex, re
           SCANCODE = os.environ["SCANCODE"]
-          with open("artifacts/components.json", "r", encoding="utf-8") as f:
-              comps = json.load(f).get("components", [])
-
+          with open("artifacts/components.json") as f:
+              comps = json.load(f)["components"]
           os.makedirs("repos", exist_ok=True)
           os.makedirs("scancode_results", exist_ok=True)
 
-          def sanitize(name: str) -> str:
-              return re.sub(r'[^A-Za-z0-9_.-]+', '-', name or "").strip('-') or "unknown"
-
-          def run(cmd, cwd=None):
-              print(f"+ {cmd}")
-              return subprocess.run(cmd, shell=True, cwd=cwd,
-                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-
-          def list_tags(url: str):
-              p = run(f"git ls-remote --tags {shlex.quote(url)}")
-              tags = []
-              for line in (p.stdout or "").splitlines():
-                  parts = line.split('\t')
-                  if len(parts) == 2:
-                      ref = parts[1]
-                      if ref.startswith("refs/tags/"):
-                          tag = ref.replace("refs/tags/", "").replace("^{}", "")
-                          tags.append(tag)
-              return tags
-
-          def clone_with_version(url: str, dest: str, version: str|None):
-              if version:
-                  tags = list_tags(url)
-                  candidates = [version, version.lstrip('v'), f"v{version}", version.replace('_','.'), version.replace('-','.')]
-                  chosen = next((c for c in candidates if c in tags), None)
-                  if chosen:
-                      run(f"git clone --depth 1 --branch {shlex.quote(chosen)} {shlex.quote(url)} {shlex.quote(dest)}")
-                      return
-                  # fallback: clone default
-                  run(f"git clone --depth 1 {shlex.quote(url)} {shlex.quote(dest)}")
-                  # best effort checkout
-                  run(f"git -C {shlex.quote(dest)} fetch --tags --depth 1")
-                  run(f"git -C {shlex.quote(dest)} checkout {shlex.quote(version)}")
-                  return
-              run(f"git clone --depth 1 {shlex.quote(url)} {shlex.quote(dest)}")
+          def sanitize(s): return re.sub(r'[^A-Za-z0-9_.-]+', '-', s or "")
+          def run(cmd): return subprocess.run(cmd, shell=True)
 
           results = []
-          for item in comps:
-              name = item.get("component")
-              version = item.get("version")
-              git_url = item.get("git_url")
-
-              if not git_url:
-                  print(f"Skipping {name} (no git_url).")
-                  results.append({"component": name, "version": version, "git_url": git_url, "copyrights": []})
+          for c in comps:
+              name, ver, url = c["component"], c.get("version"), c.get("git_url")
+              if not url:
+                  results.append({"component": name, "version": ver, "git_url": url, "copyrights": []})
                   continue
-
-              dest = os.path.join("repos", sanitize(name) + (f"-{sanitize(version)}" if version else ""))
+              dest = f"repos/{sanitize(name)}"
+              if ver: dest += f"-{sanitize(ver)}"
               if not os.path.exists(dest):
-                  p = clone_with_version(git_url, dest, version)
-
-              out_json = os.path.join("scancode_results", sanitize(name) + (f"-{sanitize(version)}" if version else "") + ".json")
-              cmd = f"{shlex.quote(SCANCODE)} --copyright --strip-root --json-pp {shlex.quote(out_json)} {shlex.quote(dest)}"
-              p = run(cmd)
-              if p.returncode not in (0,):
-                  print(p.stdout)
-
+                  if ver:
+                      run(f"git clone --depth 1 --branch {shlex.quote(ver)} {shlex.quote(url)} {shlex.quote(dest)}")
+                  else:
+                      run(f"git clone --depth 1 {shlex.quote(url)} {shlex.quote(dest)}")
+              out_json = f"scancode_results/{sanitize(name)}.json"
+              run(f"{shlex.quote(SCANCODE)} --copyright --strip-root --json-pp {shlex.quote(out_json)} {shlex.quote(dest)}")
               copyrights = set()
               try:
-                  with open(out_json, "r", encoding="utf-8") as f:
-                      data = json.load(f)
-                  for file_entry in data.get("files", []):
-                      for c in file_entry.get("copyrights", []):
-                          for stmt in c.get("statements", []) or []:
-                              stmt = (stmt or "").strip()
-                              if stmt:
-                                  copyrights.add(stmt)
-              except Exception as e:
-                  print(f"Parse failed for {name}: {e}")
-
-              results.append({
-                  "component": name,
-                  "version": version,
-                  "git_url": git_url,
-                  "copyrights": sorted(copyrights)
-              })
+                  with open(out_json) as f: data = json.load(f)
+                  for file in data.get("files", []):
+                      for cpy in file.get("copyrights", []):
+                          for stmt in cpy.get("statements", []):
+                              if stmt.strip(): copyrights.add(stmt.strip())
+              except: pass
+              results.append({"component": name, "version": ver, "git_url": url, "copyrights": sorted(copyrights)})
 
           os.makedirs("artifacts", exist_ok=True)
-          with open("artifacts/component_copyrights.json", "w", encoding="utf-8") as f:
-              json.dump({"components": results}, f, indent=2, ensure_ascii=False)
-
-          print(f"Wrote artifacts/component_copyrights.json for {len(results)} components.")
+          with open("artifacts/component_copyrights.json", "w") as f:
+              json.dump({"components": results}, f, indent=2)
           PY
 
-      - name: Upload ScanCode raw outputs (per-repo)
-        uses: actions/upload-artifact@v4
-        with:
-          name: scancode-raw
-          path: scancode_results/*.json
-          if-no-files-found: ignore
-          retention-days: 7
-
-      - name: Upload final aggregated copyrights
+      - name: Upload final copyrights
         uses: actions/upload-artifact@v4
         with:
           name: component-copyrights
           path: artifacts/component_copyrights.json
-          if-no-files-found: error
-          retention-days: 30
