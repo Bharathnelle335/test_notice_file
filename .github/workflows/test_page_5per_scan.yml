@@ -40,7 +40,7 @@ jobs:
           git lfs install
 
       # ========= Parse SBOMs → components.json (license from SBOMs) =========
-      - name: Generate components.json (URL logic: ignore generic purl, narrow pkg-locator fallback; HARD FAIL on missing URLs)
+      - name: Generate components json (URL logic: ignore generic purl, narrow pkg-locator fallback; HARD FAIL on missing URLs)
         id: generate
         shell: bash
         run: |
