@@ -1,5 +1,6 @@
 import json
 import argparse
+import re
 
 def norm(s):
     if s is None:
@@ -8,6 +9,15 @@ def norm(s):
     if not s or s.upper() in {"NOASSERTION", "NONE"}:
         return None
     return " ".join(s.split())
+
+def clean_url(url):
+    if not url:
+        return ""
+    # Remove markdown link formatting [text](url)
+    m = re.match(r"\[.*\]\((.*)\)", url)
+    if m:
+        return m.group(1)
+    return url
 
 def detect_sbom_type(doc):
     if isinstance(doc, dict):
@@ -20,7 +30,8 @@ def detect_sbom_type(doc):
 def extract_from_spdx(doc):
     components = []
     for p in doc.get("packages", []):
-        url = norm(p.get("downloadLocation")) or norm(p.get("homepage")) or ""
+        raw_url = norm(p.get("downloadLocation")) or norm(p.get("homepage")) or ""
+        url = clean_url(raw_url)
         name = url.split("/")[-1] if url else norm(p.get("name"))
         version = norm(p.get("versionInfo")) or "latest"
         if not name:
@@ -31,13 +42,14 @@ def extract_from_spdx(doc):
 def extract_from_cdx(doc):
     components = []
     for c in doc.get("components", []):
-        url = ""
+        raw_url = ""
         for extref in c.get("externalReferences", []):
-            candidate = norm(extref.get("url"))
+            candidate = clean_url(norm(extref.get("url")))
             if candidate:
-                url = candidate
+                raw_url = candidate
                 break
-        name = url.split("/")[-1] if url else norm(c.get("name"))
+        url = raw_url
+        name = url.split("/")[-1] if url else clean_url(norm(c.get("name")))
         version = norm(c.get("version")) or "latest"
         if not name:
             continue
@@ -62,7 +74,7 @@ def main():
     if detect_sbom_type(cdx_doc) == "cdx":
         components.extend(extract_from_cdx(cdx_doc))
 
-    # Deduplicate by name@version
+    # Deduplicate by (name, version)
     seen = set()
     unique_components = []
     for c in components:
@@ -71,7 +83,7 @@ def main():
             seen.add(key)
             unique_components.append(c)
 
-    # Write plain array for matrix
+    # Write plain array for matrix usage in workflow
     with open("matrix.json", "w", encoding="utf-8") as f:
         json.dump(unique_components, f, indent=2)
 
