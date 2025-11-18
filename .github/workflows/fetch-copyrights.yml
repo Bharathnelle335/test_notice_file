@@ -431,13 +431,11 @@ jobs:
           python - << 'PY'
           import json, os, re, sys
 
-          # ---- helpers ----
           def sanitize(s):
               import re
               return re.sub(r'[^A-Za-z0-9_.-]+', '-', (s or "")).strip('-') or "unknown"
 
           def esc_yaml(s):
-              # Quote if contains special YAML chars or leading/trailing spaces
               if s is None: 
                   return '""'
               if re.search(r'[:#\\-\\[\\]\\{\\},&*?]|^\\s|\\s$', s):
@@ -463,7 +461,6 @@ jobs:
               with open(path, "w", encoding="utf-8") as f:
                   f.write("\\n".join(lines) + "\\n")
 
-          # ---- load inputs ----
           try:
               with open("artifacts/components.json", "r", encoding="utf-8") as f:
                   components = json.load(f).get("components", [])
@@ -471,7 +468,6 @@ jobs:
               print(f"FATAL: cannot read artifacts/components.json: {e}")
               sys.exit(1)
 
-          # aggregated JSON fallback (if raw is missing)
           agg = {}
           try:
               with open("artifacts/component_copyrights.json", "r", encoding="utf-8") as f:
@@ -479,7 +475,6 @@ jobs:
               for c in (agg_data.get("components") or []):
                   agg[c.get("component")] = c
           except Exception as e:
-              # not fatal; we can still proceed relying on raw files only
               print(f"WARNING: cannot read aggregated JSON, will use raw only: {e}")
 
           def load_raw(component_name):
@@ -501,22 +496,16 @@ jobs:
                   k = key.strip()
                   if k:
                       counts[k] = counts.get(k, 0) + 1
-
               if not data:
                   return None
-
-              # per-file
               for fe in data.get("files", []) or []:
                   bump(fe.get("detected_license_expression_spdx"))
                   for det in fe.get("license_detections", []) or []:
                       bump(det.get("license_expression_spdx"))
                   for lic in fe.get("licenses", []) or []:
                       bump(lic.get("spdx_license_key"))
-
-              # codebase-level detections
               for det in data.get("license_detections", []) or []:
                   bump(det.get("license_expression_spdx"))
-
               if not counts: 
                   return None
               return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
@@ -525,7 +514,6 @@ jobs:
               counts = {}
               if not agg_entry:
                   return None
-              # use unique_keys collected
               for k in agg_entry.get("licenses", {}).get("unique_keys", []) or []:
                   if k:
                       counts[k] = counts.get(k, 0) + 1
@@ -549,7 +537,6 @@ jobs:
                   return []
               return list(agg_entry.get("copyrights", {}).get("unique_statements", []))
 
-          # ---- build entries ----
           entries = []
           for comp in components:
               name = comp.get("component")
@@ -559,10 +546,7 @@ jobs:
               raw = load_raw(name)
               agg_entry = agg.get(name)
 
-              # license selection
               primary_spdx = top_spdx_license_from_data(raw) or top_spdx_license_from_agg(agg_entry)
-
-              # copyright collection
               copyrights = collect_copyrights_from_data(raw) or collect_copyrights_from_agg(agg_entry)
 
               entries.append({
@@ -584,5 +568,63 @@ jobs:
         with:
           name: component-attribution
           path: artifacts/component_attribution.yaml
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Build per-component attribution file (TXT, line-by-line)
+        run: |
+          set -euo pipefail
+          python - << 'PY'
+          import json, os, sys, re
+
+          # Load aggregated JSON produced earlier
+          try:
+              with open("artifacts/component_copyrights.json", "r", encoding="utf-8") as f:
+                  agg = json.load(f)
+          except Exception as e:
+              print(f"FATAL: cannot read aggregated JSON: {e}")
+              sys.exit(1)
+
+          comps = agg.get("components", [])
+          lines = []
+          for c in comps:
+              name = c.get("component") or ""
+              version = c.get("version")
+              url = c.get("git_url") or ""
+              # primary license = first of unique_keys if present
+              keys = c.get("licenses", {}).get("unique_keys", []) or []
+              license_str = keys[0] if keys else ""
+
+              lines.append(f"Component: {name}")
+              if version:
+                  lines.append(f"Version: {version}")
+              lines.append(f"URL: {url}")
+              lines.append(f"License: {license_str}")
+              lines.append("Copyrights:")
+
+              cps = c.get("copyrights", {}).get("unique_statements", []) or []
+              if cps:
+                  for stmt in cps:
+                      # normalize angle braces to readable form
+                      stmt = re.sub(r'<', '&lt;', stmt)
+                      stmt = re.sub(r'>', '&gt;', stmt)
+                      lines.append(f"- {stmt}")
+              else:
+                  lines.append("- (none)")
+
+              lines.append("")  # blank line between components
+
+          os.makedirs("artifacts", exist_ok=True)
+          out_txt = "artifacts/component_attribution.txt"
+          with open(out_txt, "w", encoding="utf-8") as f:
+              f.write("\n".join(lines).rstrip() + "\n")
+          print(f"Wrote {out_txt} with {len(comps)} components.")
+          PY
+
+      - name: Upload per-component attribution (TXT)
+        uses: actions/upload-artifact@v4
+        with:
+          name: component-attribution-text
+          path: artifacts/component_attribution.txt
           if-no-files-found: error
           retention-days: 30
