@@ -10,12 +10,11 @@ permissions:
   contents: read
 
 jobs:
-  # 1) PREPARE: parse SBOMs, build components.json, split into parts of 5
   prepare:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
-      parts: ${{ steps.split.outputs.parts }}   # JSON array of part indexes: ["0","1","2", ...]
+      parts: ${{ steps.split.outputs.parts }}
       part_count: ${{ steps.split.outputs.part_count }}
     steps:
       - name: Checkout
@@ -42,7 +41,7 @@ jobs:
           git lfs install
 
       # ========= Parse SBOMs → components.json (license from SBOMs) =========
-      - name: Generate components.json (URL logic: ignore generic purl, add narrow pkg-locator fallback; HARD FAIL on missing URLs)
+      - name: Generate components.json (URL logic: ignore generic purl, narrow pkg-locator fallback; HARD FAIL on missing URLs)
         id: generate
         shell: bash
         run: |
@@ -58,12 +57,13 @@ jobs:
               with open(path, 'r', encoding='utf-8') as f: return json.load(f)
 
           HOSTS = ("github.com", "gitlab.com", "bitbucket.org")
-          def is_git_host(url: str|None) -> bool:
+
+          def is_git_host(url):
               if not url: return False
               u = url.strip().lower()
-              return any(h in u for h in HOSTS) or u.startswith(("git://","git@","ssh://"))
+              return ("github.com" in u) or ("gitlab.com" in u) or ("bitbucket.org" in u) or u.startswith(("git://","git@","ssh://"))
 
-          def normalize_git_url(url: str|None) -> str|None:
+          def normalize_git_url(url):
               # Accept only repo/VCS URLs. If startswith pkg:, ignore. Add .git to http(s) host URLs.
               if not url: return None
               u = url.strip()
@@ -77,7 +77,7 @@ jobs:
                   return uu
               return u
 
-          def last_segment(name: str|None):
+          def last_segment(name):
               if not name: return None
               s = name
               for sep in ('/', ':'):
@@ -97,16 +97,16 @@ jobs:
               component = urllib.parse.unquote(base.split('/')[-1])
               return (component, version, None)
 
-          def clean_version(ver: str|None) -> str|None:
+          def clean_version(ver):
               if not ver: return None
               v = str(ver).strip().lower()
               if v in {"", "unknown", "n/a", "na", "none"}: return None
               return str(ver).strip()
 
-          def pick_spdx_license_from_spdx(pkg) -> str|None:
+          def pick_spdx_license_from_spdx(pkg):
               return (pkg.get("licenseConcluded") or pkg.get("licenseDeclared") or None)
 
-          def pick_spdx_license_from_cdx(comp) -> str|None:
+          def pick_spdx_license_from_cdx(comp):
               for lic in comp.get("licenses", []) or []:
                   lobj = lic.get("license") or {}
                   spdx_id = lobj.get("id")
@@ -116,12 +116,12 @@ jobs:
               return None
 
           # Narrow fallback for pkg-like locators embedded in externalRefs
-          def _git_url_from_pkgish_locator(locator: str|None) -> str|None:
+          def _git_url_from_pkgish_locator(locator):
               if not locator: return None
               s = locator.strip()
-              if not s.startswith("pkg:"): 
+              if not s.startswith("pkg:"):
                   return None
-              body = s[4:]  # drop 'pkg:'
+              body = s[4:]
               body = body.split('#', 1)[0].split('?', 1)[0]
               if '@' in body:
                   body, _ = body.rsplit('@', 1)
@@ -136,10 +136,10 @@ jobs:
                   host, owner, repo = parts[0], parts[1], parts[2]
               if host and owner and repo:
                   repo = repo.rstrip(".git")
-                  return f"https://{host}/{owner}/{repo}.git"
+                  return "https://%s/%s/%s.git" % (host, owner, repo)
               return None
 
-          def best_git_url_from_spdx(pkg) -> str|None:
+          def best_git_url_from_spdx(pkg):
               if not pkg: return None
               u = normalize_git_url(pkg.get("downloadLocation") or "")
               if u: return u
@@ -159,7 +159,7 @@ jobs:
                       if u: return u
               return None
 
-          def best_git_url_from_cdx(comp, purl) -> str|None:
+          def best_git_url_from_cdx(comp, purl):
               if comp:
                   for ref in comp.get("externalReferences", []) or []:
                       rtype = (ref.get("type") or "").lower()
@@ -235,12 +235,12 @@ jobs:
           os.makedirs("artifacts", exist_ok=True)
           with open("artifacts/components.json", "w", encoding="utf-8") as f:
               json.dump({"components": result}, f, indent=2, ensure_ascii=False)
-          print(f"Wrote artifacts/components.json with {len(result)} components.")
+          print("Wrote artifacts/components.json with %d components." % len(result))
 
           # HARD FAIL if any component lacks a usable repo URL
           missing = [c["component"] for c in result if not c.get("git_url")]
           if missing:
-              print("ERROR: No git_url found for components:", ", ".join(missing))
+              print("ERROR: No git_url found for components: %s" % ", ".join(missing))
               sys.exit(2)
           PY
 
@@ -264,13 +264,13 @@ jobs:
           parts = [comps[i:i+size] for i in range(0, len(comps), size)]
           idxs = []
           for i, part in enumerate(parts):
-              with open(f"artifacts/components_part_{i}.json","w",encoding="utf-8") as f:
+              with open("artifacts/components_part_%d.json" % i, "w", encoding="utf-8") as f:
                   json.dump({"components": part}, f, indent=2, ensure_ascii=False)
               idxs.append(str(i))
           with open(os.environ["GITHUB_OUTPUT"], "a") as gh:
-              gh.write(f"parts={json.dumps(idxs)}\n")
-              gh.write(f"part_count={len(parts)}\n")
-          print(f"Split {len(comps)} components into {len(parts)} parts of up to {size}.")
+              gh.write("parts=%s\n" % json.dumps(idxs))
+              gh.write("part_count=%d\n" % len(parts))
+          print("Split %d components into %d parts of up to %d." % (len(comps), len(parts), size))
           PY
 
       - name: Upload parts
@@ -279,7 +279,6 @@ jobs:
           name: components-parts
           path: artifacts/components_part_*.json
 
-  # 2) SCAN: matrix over parts, each scans 5 components and uploads partial + cumulative progress outputs
   scan:
     needs: prepare
     runs-on: ubuntu-latest
@@ -336,13 +335,13 @@ jobs:
           import json, os, subprocess, shlex, re
           part_index = os.environ["PART_INDEX"]
           SCANCODE = os.environ["SCANCODE"]
-          with open(f"artifacts/parts/components_part_{part_index}.json","r",encoding="utf-8") as f:
+          with open("artifacts/parts/components_part_%s.json" % part_index,"r",encoding="utf-8") as f:
               comps = json.load(f).get("components", [])
 
-          os.makedirs(f"repos_part_{part_index}", exist_ok=True)
-          os.makedirs(f"scancode_results_part_{part_index}", exist_ok=True)
+          os.makedirs("repos_part_%s" % part_index, exist_ok=True)
+          os.makedirs("scancode_results_part_%s" % part_index, exist_ok=True)
 
-          def sanitize(s): 
+          def sanitize(s):
               return re.sub(r'[^A-Za-z0-9_.-]+','-', (s or "")).strip('-') or "unknown"
 
           def run(cmd):
@@ -354,38 +353,37 @@ jobs:
               version = item.get("version")  # None => default branch
               git_url = item.get("git_url")
 
-              out_json = os.path.join(f"scancode_results_part_{part_index}", sanitize(name) + ".json")
+              out_json = os.path.join("scancode_results_part_%s" % part_index, sanitize(name) + ".json")
 
               if not name or not git_url:
                   with open(out_json, "w", encoding="utf-8") as f:
                       json.dump({"files": [], "status": "skipped:no-git-url"}, f)
                   continue
 
-              dest = os.path.join(f"repos_part_{part_index}", sanitize(name) + (f"-{sanitize(version)}" if version else ""))
+              dest = os.path.join("repos_part_%s" % part_index, sanitize(name) + ("-%s" % sanitize(version) if version else ""))
 
               if not os.path.exists(dest):
                   if version:
-                      p = run(f"git clone --depth 1 --branch {shlex.quote(str(version))} {shlex.quote(git_url)} {shlex.quote(dest)}")
+                      p = run("git clone --depth 1 --branch %s %s %s" % (shlex.quote(str(version)), shlex.quote(git_url), shlex.quote(dest)))
                       if p.returncode != 0:
                           print(p.stdout)
                           with open(out_json, "w", encoding="utf-8") as f:
                               json.dump({"files": [], "status": "skipped:clone-failed"}, f)
                           continue
                   else:
-                      p = run(f"git clone --depth 1 {shlex.quote(git_url)} {shlex.quote(dest)}")
+                      p = run("git clone --depth 1 %s %s" % (shlex.quote(git_url), shlex.quote(dest)))
                       if p.returncode != 0:
                           print(p.stdout)
                           with open(out_json, "w", encoding="utf-8") as f:
                               json.dump({"files": [], "status": "skipped:clone-failed"}, f)
                           continue
 
-              # Faster ScanCode: multiprocessing + common excludes
               cmd = (
-                f"{shlex.quote(SCANCODE)} --processes 4 "
-                f"--exclude .git --exclude vendor --exclude node_modules --exclude tests --exclude test --exclude docs "
-                f"--copyright --license --strip-root "
-                f"--json-pp {shlex.quote(out_json)} {shlex.quote(dest)}"
-              )
+                "%s --processes 4 "
+                "--exclude .git --exclude vendor --exclude node_modules --exclude tests --exclude test --exclude docs "
+                "--copyright --license --strip-root "
+                "--json-pp %s %s"
+              ) % (shlex.quote(SCANCODE), shlex.quote(out_json), shlex.quote(dest))
               p = run(cmd)
               if p.returncode != 0:
                   print(p.stdout)
@@ -413,13 +411,11 @@ jobs:
               import re
               return re.sub(r'[^A-Za-z0-9_.-]+','-', (s or "")).strip('-') or "unknown"
 
-          # Load part components
-          with open(f"artifacts/parts/components_part_{idx}.json","r",encoding="utf-8") as f:
+          with open("artifacts/parts/components_part_%s.json" % idx,"r",encoding="utf-8") as f:
               comps = json.load(f).get("components", [])
 
-          # Load raw scan outputs
           def load_raw(name):
-              p = os.path.join(f"scancode_results_part_{idx}", sanitize(name) + ".json")
+              p = os.path.join("scancode_results_part_%s" % idx, sanitize(name) + ".json")
               if os.path.exists(p):
                   with open(p,"r",encoding="utf-8") as f:
                       return json.load(f)
@@ -473,9 +469,9 @@ jobs:
               })
 
           os.makedirs("artifacts", exist_ok=True)
-          with open(f"artifacts/component_copyrights_part_{idx}.json","w",encoding="utf-8") as f:
+          with open("artifacts/component_copyrights_part_%s.json" % idx,"w",encoding="utf-8") as f:
               json.dump({"components": results}, f, indent=2, ensure_ascii=False)
-          print(f"Wrote artifacts/component_copyrights_part_{idx}.json with {len(results)} components.")
+          print("Wrote artifacts/component_copyrights_part_%s.json with %d components." % (idx, len(results)))
           PY
 
       - name: Upload part aggregated copyrights (JSON)
@@ -496,9 +492,9 @@ jobs:
           import json, os, re
           idx = os.environ["PART_INDEX"]
 
-          with open(f"artifacts/parts/components_part_{idx}.json","r",encoding="utf-8") as f:
+          with open("artifacts/parts/components_part_%s.json" % idx,"r",encoding="utf-8") as f:
               components = json.load(f).get("components", [])
-          with open(f"artifacts/component_copyrights_part_{idx}.json","r",encoding="utf-8") as f:
+          with open("artifacts/component_copyrights_part_%s.json" % idx,"r",encoding="utf-8") as f:
               agg = json.load(f).get("components", [])
 
           by_name = {c.get("component"): c for c in agg}
@@ -508,7 +504,6 @@ jobs:
                   return '"' + s.replace('"','\\"') + '"'
               return s
 
-          # YAML
           lines = []
           lines.append("components:")
           for comp in components:
@@ -530,33 +525,32 @@ jobs:
                   lines.append("    copyrights: []")
 
           os.makedirs("artifacts", exist_ok=True)
-          with open(f"artifacts/component_attribution_part_{idx}.yaml","w",encoding="utf-8") as f:
+          with open("artifacts/component_attribution_part_%s.yaml" % idx,"w",encoding="utf-8") as f:
               f.write("\n".join(lines) + "\n")
 
-          # TXT
           t = []
           for comp in components:
               name = comp.get("component") or ""
               version = comp.get("version")
               url = comp.get("git_url") or ""
               lic = comp.get("license") or ""
-              t.append(f"Component: {name}")
+              t.append("Component: %s" % name)
               if version:
-                  t.append(f"Version: {version}")
-              t.append(f"URL: {url}")
-              t.append(f"License: {lic}")
+                  t.append("Version: %s" % version)
+              t.append("URL: %s" % url)
+              t.append("License: %s" % lic)
               t.append("Copyrights:")
               cps = (by_name.get(name, {}) or {}).get("copyrights", {}).get("unique_statements", []) or []
               if cps:
                   for s in cps:
-                      t.append(f"- {s}")
+                      t.append("- %s" % s)
               else:
                   t.append("- (none)")
               t.append("")
-          with open(f"artifacts/component_attribution_part_{idx}.txt","w",encoding="utf-8") as f:
+          with open("artifacts/component_attribution_part_%s.txt" % idx,"w",encoding="utf-8") as f:
               f.write("\n".join(t).rstrip() + "\n")
 
-          print(f"Wrote per-part attribution YAML/TXT for part {idx}.")
+          print("Wrote per-part attribution YAML/TXT for part %s." % idx)
           PY
 
       - name: Upload per-part attribution (YAML)
@@ -572,7 +566,6 @@ jobs:
         with:
           name: component-attribution-text-part-${{ matrix.part }}
           path: artifacts/component_attribution_part_${{ matrix.part }}.txt
-        # Note: overwrite not supported for per-part here (unique names)
 
       # ======= Cumulative PROGRESS build (append results so far) =======
       - name: Download all available part JSONs (so far)
@@ -580,7 +573,7 @@ jobs:
         with:
           pattern: component-copyrights-part-*
           merge-multiple: true
-          path: artifacts/parts_agg_so_far
+        # default path: ./ (we read with glob in script)
 
       - name: Download base components.json (for order)
         uses: actions/download-artifact@v4
@@ -597,38 +590,32 @@ jobs:
 
           os.makedirs("artifacts", exist_ok=True)
 
-          # Load base components for order
           with open("artifacts/components.json","r",encoding="utf-8") as f:
               base = json.load(f).get("components", [])
 
-          # Load available part aggregates so far
           merged = {}
-          for fp in sorted(glob.glob("artifacts/parts_agg_so_far/component*_part_*.json")):
+          for fp in sorted(glob.glob("component*_part_*.json")):
               with open(fp,"r",encoding="utf-8") as f:
                   data = json.load(f).get("components", [])
                   for c in data:
                       key = (c.get("component"), c.get("version") or "")
                       merged[key] = c
 
-          # Build progress list in base order, but include ONLY scanned so far
           progress = []
           for comp in base:
               key = (comp.get("component"), comp.get("version") or "")
               if key in merged:
                   progress.append(merged[key])
 
-          # Write PROGRESS JSON
           with open("artifacts/component_copyrights_progress.json","w",encoding="utf-8") as f:
               json.dump({"components": progress}, f, indent=2, ensure_ascii=False)
 
-          # Build YAML/TXT from progress (order preserved)
           def esc(s):
               if s is None: return '""'
               if re.search(r'[:#\-\[\]{},&*?]|^\s|\s$', s):
                   return '"' + s.replace('"','\\"') + '"'
               return s
 
-          # YAML
           yl = ["components:"]
           for c in progress:
               name   = c.get("component")
@@ -650,28 +637,27 @@ jobs:
           with open("artifacts/component_attribution_progress.yaml","w",encoding="utf-8") as f:
               f.write("\n".join(yl) + "\n")
 
-          # TXT
           tl = []
           for c in progress:
               name    = c.get("component") or ""
               version = c.get("version")
               url     = c.get("git_url") or ""
               lic     = c.get("license") or ""
-              tl.append(f"Component: {name}")
-              if version: tl.append(f"Version: {version}")
-              tl.append(f"URL: {url}")
-              tl.append(f"License: {lic}")
+              tl.append("Component: %s" % name)
+              if version: tl.append("Version: %s" % version)
+              tl.append("URL: %s" % url)
+              tl.append("License: %s" % lic)
               tl.append("Copyrights:")
               cps = c.get("copyrights", {}).get("unique_statements", []) or []
               if cps:
-                  for s in cps: tl.append(f"- {s}")
+                  for s in cps: tl.append("- %s" % s)
               else:
                   tl.append("- (none)")
               tl.append("")
           with open("artifacts/component_attribution_progress.txt","w",encoding="utf-8") as f:
               f.write("\n".join(tl).rstrip() + "\n")
 
-          print(f"Progress: {len(progress)} components merged so far.")
+          print("Progress: %d components merged so far." % len(progress))
           PY
 
       - name: Upload cumulative PROGRESS (JSON)
@@ -698,7 +684,6 @@ jobs:
           overwrite: true
           retention-days: 7
 
-  # 3) AGGREGATE: merge all parts into final outputs after all scans finish (order preserved)
   aggregate:
     needs: [prepare, scan]
     runs-on: ubuntu-latest
@@ -718,7 +703,6 @@ jobs:
         with:
           pattern: component-copyrights-part-*
           merge-multiple: true
-          path: artifacts/parts_agg
 
       - name: Merge per-part copyrights → final JSON (order preserved)
         shell: bash
@@ -728,28 +712,23 @@ jobs:
           import json, os, glob
           os.makedirs("artifacts", exist_ok=True)
 
-          # Load base components (to preserve order)
           with open("artifacts/components.json","r",encoding="utf-8") as f:
               all_components = json.load(f).get("components", [])
 
-          # Load all part aggregations
           merged = {}
-          for fp in sorted(glob.glob("artifacts/parts_agg/component*_part_*.json")):
+          for fp in sorted(glob.glob("component*_part_*.json")):
               with open(fp,"r",encoding="utf-8") as f:
                   data = json.load(f).get("components", [])
                   for c in data:
                       key = (c.get("component"), c.get("version") or "")
                       merged[key] = c
 
-          # Build final list in the same order as all_components
           out = []
           for comp in all_components:
               key = (comp.get("component"), comp.get("version") or "")
               if key in merged:
                   out.append(merged[key])
               else:
-                  # Shouldn't happen (prepare hard-failed missing git_url),
-                  # but keep a defensive placeholder.
                   out.append({
                       "component": comp.get("component"),
                       "version": comp.get("version"),
@@ -764,7 +743,7 @@ jobs:
 
           with open("artifacts/component_copyrights.json","w",encoding="utf-8") as f:
               json.dump({"components": out}, f, indent=2, ensure_ascii=False)
-          print(f"Merged final copyrights for {len(out)} components (order preserved).")
+          print("Merged final copyrights for %d components." % len(out))
           PY
 
       - name: Upload final aggregated copyrights (JSON)
@@ -788,14 +767,12 @@ jobs:
               agg = json.load(f).get("components", [])
 
           by_name = {c.get("component"): c for c in agg}
-
           def esc(s):
               if s is None: return '""'
               if re.search(r'[:#\-\[\]{},&*?]|^\s|\s$', s):
                   return '"' + s.replace('"','\\"') + '"'
               return s
 
-          # YAML
           yl = ["components:"]
           for comp in components:
               name   = comp.get("component")
@@ -819,22 +796,21 @@ jobs:
           with open("artifacts/component_attribution.yaml","w",encoding="utf-8") as f:
               f.write("\n".join(yl) + "\n")
 
-          # TXT
           tl = []
           for comp in components:
               name    = comp.get("component") or ""
               version = comp.get("version")
               url     = comp.get("git_url") or ""
               lic     = comp.get("license") or ""
-              tl.append(f"Component: {name}")
-              if version: tl.append(f"Version: {version}")
-              tl.append(f"URL: {url}")
-              tl.append(f"License: {lic}")
+              tl.append("Component: %s" % name)
+              if version: tl.append("Version: %s" % version)
+              tl.append("URL: %s" % url)
+              tl.append("License: %s" % lic)
               tl.append("Copyrights:")
               cps = (by_name.get(name, {}) or {}).get("copyrights", {}).get("unique_statements", []) or []
               if cps:
                   for s in cps:
-                      tl.append(f"- {s}")
+                      tl.append("- %s" % s)
               else:
                   tl.append("- (none)")
               tl.append("")
