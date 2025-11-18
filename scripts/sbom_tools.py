@@ -242,10 +242,11 @@ def cmd_generate(_args):
         json.dump({"components": result}, f, indent=2, ensure_ascii=False)
     print(f"Wrote artifacts/components.json with {len(result)} components.")
 
+    # <<< CHANGED: do not fail on missing URLs; keep and continue >>>
     missing = [c["component"] for c in result if not c.get("git_url")]
     if missing:
-        print("ERROR: No git_url found for components: " + ", ".join(missing))
-        sys.exit(2)
+        print("WARNING: No git_url found for components (will keep and continue): " + ", ".join(missing))
+        # Do NOT exit; we keep these components for downstream steps.
 
 def cmd_split(_args):
     ensure_dir("artifacts")
@@ -280,6 +281,7 @@ def cmd_scan_part(args):
         git_url = item.get("git_url")
         out_json = os.path.join(f"scancode_results_part_{part_index}", sanitize(name) + ".json")
         if not name or not git_url:
+            # <<< keep an explicit record for aggregation >>>
             with open(out_json, "w", encoding="utf-8") as f:
                 json.dump({"files": [], "status": "skipped:no-git-url"}, f)
             continue
