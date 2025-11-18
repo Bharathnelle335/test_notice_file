@@ -14,7 +14,7 @@ def clean_url(url):
     if not url:
         return ""
     # Remove markdown link formatting [text](url)
-    m = re.match(r"\[.*\]\((.*)\)", url)
+    m = re.match(r"\[.*?\]\((.*?)\)", url)
     if m:
         return m.group(1)
     return url
@@ -49,7 +49,7 @@ def extract_from_cdx(doc):
                 raw_url = candidate
                 break
         url = raw_url
-        name = url.split("/")[-1] if url else clean_url(norm(c.get("name")))
+        name = url.split("/")[-1] if url else norm(c.get("name"))
         version = norm(c.get("version")) or "latest"
         if not name:
             continue
