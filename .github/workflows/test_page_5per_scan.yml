@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
-      parts: ${{ steps.split.outputs.parts }} # JSON array of part indexes: ["0","1","2", ...]
+      parts: ${{ steps.split.outputs.parts }} # JSON array: ["0","1","2", ...]
       part_count: ${{ steps.split.outputs.part_count }}
     steps:
       - name: Checkout
@@ -175,7 +175,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: components-json
-        # default path: ./ (artifact preserves original subpaths)
+          path: artifacts   # <-- ensure artifacts/components.json exists
 
       - name: Build cumulative PROGRESS (JSON + YAML + TXT) from available parts
         shell: bash
