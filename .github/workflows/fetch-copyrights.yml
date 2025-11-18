@@ -36,7 +36,7 @@ jobs:
           sudo apt-get install -y git-lfs xz-utils
           git lfs install
 
-      - name: Generate components.json from SBOMs (infer git_url; omit unknown version)
+      - name: Generate components.json from SBOMs (robust git_url; omit unknown version)
         run: |
           set -euo pipefail
           python - << 'PY'
@@ -54,13 +54,37 @@ jobs:
               u = url.lower()
               return ("github.com" in u) or ("gitlab.com" in u) or ("bitbucket.org" in u) or u.startswith(("git://", "git@", "ssh://"))
 
+          def from_purl_to_git(url: str|None) -> str|None:
+              """Convert a purl-like string (including leading 'pkg:') to https://... .git"""
+              if not url: return None
+              s = url.strip()
+              if s.startswith("pkg:"): s = s[4:]
+              # remove qualifiers and fragments
+              s = s.split('#', 1)[0].split('?', 1)[0]
+              # drop @version part
+              base = s.rsplit('@', 1)[0]
+              m = re.search(r'^(?:github\\.com|gitlab\\.com|bitbucket\\.org)/([^/]+)/([^/]+)$', base)
+              if m:
+                  owner, repo = m.groups()
+                  repo = repo.rstrip('.git')
+                  return f"https://{base.split('/')[0]}/{owner}/{repo}.git"
+              # if it looked like full https://host/owner/repo, pass-through
+              if base.startswith(("http://","https://")) and is_git_host(base):
+                  u = base.rstrip("/")
+                  if not u.endswith(".git"): u += ".git"
+                  return u
+              return None
+
           def normalize_git_url(url: str|None) -> str|None:
               if not url: return None
-              url = url.strip()
-              if url.startswith("http") and is_git_host(url) and not url.endswith(".git"):
-                  url = url.rstrip("/")
-                  url += ".git"
-              return url
+              # if someone stored a purl string in git_url, convert it
+              if url.strip().startswith("pkg:"):
+                  converted = from_purl_to_git(url)
+                  if converted: return converted
+              u = url.strip()
+              if u.startswith("http") and is_git_host(u) and not u.endswith(".git"):
+                  u = u.rstrip("/") + ".git"
+              return u
 
           def last_segment(name: str|None):
               if not name: return None
@@ -79,12 +103,7 @@ jobs:
               if '@' in s:
                   base, version = s.rsplit('@', 1)
               component = urllib.parse.unquote(base.split('/')[-1])
-              m = re.search(r'(github\\.com|gitlab\\.com|bitbucket\\.org)/([^/?#]+)/([^/?#]+)', base)
-              git_url = None
-              if m:
-                  host, owner, repo = m.groups()
-                  repo = repo.rstrip('.git')
-                  git_url = f"https://{host}/{owner}/{repo}.git"
+              git_url = from_purl_to_git(purl)
               return (component, version, git_url)
 
           def clean_version(ver: str|None) -> str|None:
@@ -166,11 +185,18 @@ jobs:
                       out.append({"component": name, "version": version, "git_url": git_url})
               return out
 
+          # Parse, merge, de-duplicate by component+version (git_url may vary)
           comps = parse_cyclonedx(CDX_PATH) + parse_spdx(SPDX_PATH)
           seen, result = set(), []
           for c in comps:
-              key = (c["component"], c.get("version") or "", c.get("git_url") or "")
-              if key in seen: continue
+              key = (c["component"], c.get("version") or "")
+              if key in seen: 
+                  # prefer entries with a valid git_url
+                  if c.get("git_url"):
+                      for r in result:
+                          if (r["component"], r.get("version") or "") == key and not r.get("git_url"):
+                              r["git_url"] = c["git_url"]
+                  continue
               seen.add(key)
               result.append(c)
 
@@ -212,7 +238,7 @@ jobs:
           import json, os, subprocess, shlex, re
 
           SCANCODE = os.environ["SCANCODE"]
-          SUMMARY = os.environ.get("GITHUB_STEP_SUMMARY")
+          SUMMARY_PATH = os.environ.get("GITHUB_STEP_SUMMARY")
 
           with open("artifacts/components.json", "r", encoding="utf-8") as f:
               comps = json.load(f).get("components", [])
@@ -228,8 +254,8 @@ jobs:
           md = []
           md.append("## Component-wise Scan Summary")
           md.append("")
-          md.append("| Component | Version | Repo URL | Checkout | Status | #Copyrights | Licenses |")
-          md.append("|---|---|---|---|---|---:|---|")
+          md.append("| Component | Version | Repo URL | Checkout | Status | Files | Errors | #Copyrights | Licenses |")
+          md.append("|---|---|---|---|---|---:|---:|---:|---|")
 
           results = []
           for item in comps:
@@ -242,6 +268,8 @@ jobs:
 
               checkout_desc = "default branch" if not version else f"tag/branch `{version}`"
               status = "skipped"
+              files_count = 0
+              errors_count = 0
               copy_count = 0
               license_keys_preview = "-"
 
@@ -249,7 +277,7 @@ jobs:
                   results.append({"component": name, "version": version, "git_url": git_url,
                                   "copyrights": {"unique_statements": [], "per_file": []},
                                   "licenses": {"unique_keys": [], "per_file": []}})
-                  md.append(f"| `{name}` | {version or ''} | *(none)* | {checkout_desc} | skipped | 0 | - |")
+                  md.append(f"| `{name}` | {version or ''} | *(none)* | {checkout_desc} | skipped | 0 | 0 | 0 | - |")
                   continue
 
               dest = os.path.join("repos", sanitize(name) + (f"-{sanitize(version)}" if version else ""))
@@ -262,7 +290,7 @@ jobs:
                           results.append({"component": name, "version": version, "git_url": git_url,
                                           "copyrights": {"unique_statements": [], "per_file": []},
                                           "licenses": {"unique_keys": [], "per_file": []}})
-                          md.append(f"| `{name}` | {version or ''} | {git_url} | {checkout_desc} | {status} | 0 | - |")
+                          md.append(f"| `{name}` | {version or ''} | {git_url} | {checkout_desc} | {status} | 0 | 0 | 0 | - |")
                           continue
                   else:
                       p = run(f"git clone --depth 1 {shlex.quote(git_url)} {shlex.quote(dest)}")
@@ -272,7 +300,7 @@ jobs:
                           results.append({"component": name, "version": version, "git_url": git_url,
                                           "copyrights": {"unique_statements": [], "per_file": []},
                                           "licenses": {"unique_keys": [], "per_file": []}})
-                          md.append(f"| `{name}` | {version or ''} | {git_url} | {checkout_desc} | {status} | 0 | - |")
+                          md.append(f"| `{name}` | {version or ''} | {git_url} | {checkout_desc} | {status} | 0 | 0 | 0 | - |")
                           continue
 
               out_json = os.path.join("scancode_results", sanitize(name) + ".json")
@@ -289,21 +317,31 @@ jobs:
               try:
                   with open(out_json, "r", encoding="utf-8") as f:
                       data = json.load(f)
-                  for file_entry in data.get("files", []):
-                      path = file_entry.get("path") or file_entry.get("location") or ""
-                      # Copyrights
+
+                  # headers → counts/errors if available
+                  headers = data.get("headers", [])
+                  if headers:
+                      h0 = headers[0]
+                      files_count = h0.get("files_count") or h0.get("resource_count") or 0
+                      errors_count = len(h0.get("errors", []) or [])
+
+                  # Parse per-file entries
+                  for fe in data.get("files", []) or []:
+                      path = fe.get("path") or fe.get("location") or ""
+
+                      # Copyrights (statements + holders)
                       file_statements = []
                       holders = []
-                      for c in file_entry.get("copyrights", []) or []:
+                      for c in fe.get("copyrights", []) or []:
                           for stmt in c.get("statements", []) or []:
-                              if stmt:
-                                  s = stmt.strip()
-                                  if s:
-                                      file_statements.append(s)
-                                      unique_copyrights.add(s)
+                              s = (stmt or "").strip()
+                              if s:
+                                  file_statements.append(s)
+                                  unique_copyrights.add(s)
                           for h in c.get("holders", []) or []:
+                              h = (h or "").strip()
                               if h:
-                                  holders.append(h.strip())
+                                  holders.append(h)
                       if file_statements or holders:
                           per_file_copyrights.append({
                               "path": path,
@@ -311,35 +349,53 @@ jobs:
                               "holders": holders
                           })
 
-                      # Licenses
-                      detected_expr = file_entry.get("detected_license_expression") or ""
-                      lic_items = []
-                      for lic in file_entry.get("licenses", []) or []:
+                      # Licenses: both legacy "licenses" and modern detections/expressions
+                      # 1) direct license entries
+                      for lic in fe.get("licenses", []) or []:
                           key = lic.get("key")
                           if key:
                               unique_license_keys.add(key)
-                          lic_items.append({
-                              "key": lic.get("key"),
-                              "spdx_key": lic.get("spdx_license_key"),
-                              "score": lic.get("score"),
-                              "start_line": lic.get("start_line"),
-                              "end_line": lic.get("end_line")
-                          })
-                      if detected_expr or lic_items:
+                      # 2) detected license expression
+                      expr = fe.get("detected_license_expression") or fe.get("license_expression") or ""
+                      if expr:
+                          # split simple AND/OR expressions to preview keys
+                          for token in re.split(r'\\s+(AND|OR|WITH)\\s+', expr):
+                              token = token.strip()
+                              if token and token not in {"AND","OR","WITH"}:
+                                  unique_license_keys.add(token)
+                      # 3) modern license_detections (per file)
+                      for det in fe.get("license_detections", []) or []:
+                          k = det.get("license_expression") or det.get("license_expression_spdx") or ""
+                          if k:
+                              for token in re.split(r'\\s+(AND|OR|WITH)\\s+', k):
+                                  token = token.strip()
+                                  if token and token not in {"AND","OR","WITH"}:
+                                      unique_license_keys.add(token)
+                          # keep detection slices
                           per_file_licenses.append({
                               "path": path,
-                              "detected_expression": detected_expr,
-                              "licenses": lic_items
+                              "detected_expression": det.get("license_expression") or det.get("license_expression_spdx"),
+                              "matches": det.get("matches", [])
                           })
+
+                  # codebase-level unique license detections (if present)
+                  for det in data.get("license_detections", []) or []:
+                      k = det.get("license_expression") or det.get("license_expression_spdx") or ""
+                      if k:
+                          for token in re.split(r'\\s+(AND|OR|WITH)\\s+', k):
+                              token = token.strip()
+                              if token and token not in {"AND","OR","WITH"}:
+                                  unique_license_keys.add(token)
+
               except Exception as e:
                   print(f"Parse failed for {name}: {e}")
 
               copy_count = len(unique_copyrights)
               status = "scanned"
-              # Show up to 3 license keys in summary
+              license_keys_preview = "-"
               if unique_license_keys:
                   preview = sorted(unique_license_keys)[:3]
-                  license_keys_preview = ", ".join(preview) + ("…" if len(unique_license_keys) > 3 else "-")
+                  license_keys_preview = ", ".join(preview) + ("…" if len(unique_license_keys) > 3 else "")
 
               results.append({
                   "component": name,
@@ -355,16 +411,14 @@ jobs:
                   }
               })
 
-              md.append(f"| `{name}` | {version or ''} | {git_url} | {checkout_desc} | {status} | {copy_count} | {license_keys_preview} |")
+              md.append(f"| `{name}` | {version or ''} | {git_url} | {checkout_desc} | {status} | {files_count} | {errors_count} | {copy_count} | {license_keys_preview or '-'} |")
 
           os.makedirs("artifacts", exist_ok=True)
           with open("artifacts/component_copyrights.json", "w", encoding="utf-8") as f:
               json.dump({"components": results}, f, indent=2, ensure_ascii=False)
 
-          # Write Markdown summary (GitHub UI)
-          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
-          if summary_path:
-              with open(summary_path, "a", encoding="utf-8") as sf:
+          if SUMMARY_PATH:
+              with open(SUMMARY_PATH, "a", encoding="utf-8") as sf:
                   sf.write("\\n".join(md) + "\\n")
 
           print(f"Wrote artifacts/component_copyrights.json for {len(results)} components.")
@@ -384,4 +438,3 @@ jobs:
           name: component-copyrights-licenses
           path: artifacts/component_copyrights.json
           if-no-files-found: error
-          retention-days: 30
