@@ -1,43 +1,34 @@
-name: Generate NOTICE (matrix + ScanCode)
+name: Scan Components from SPDX and CycloneDX
 
 on:
   workflow_dispatch:
     inputs:
-      sbom_paths:
-        description: "Comma-separated SBOM JSON paths (SPDX or CycloneDX)"
+      spdx_json:
+        description: 'Path to SPDX-lite JSON'
         required: true
-        default: "sboms/spdx-lite.json,sboms/cyclonedx.json"
-      notice_title:
-        description: "Title for NOTICE.md"
-        required: false
-        default: "Open Source Notices"
-
-  push:
-    branches: [ main, master ]
-    paths:
-      - "sboms/**/*.json"
+        default: 'sboms/spdx-lite.json'
+      cyclonedx_json:
+        description: 'Path to CycloneDX JSON'
+        required: true
+        default: 'sboms/cyclonedx.json'
 
 jobs:
   prepare:
     runs-on: ubuntu-latest
     outputs:
       matrix_json: ${{ steps.set_outputs.outputs.matrix_json }}
-      title: ${{ steps.set_outputs.outputs.title }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-      - name: Install parsers
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install spdx-tools cyclonedx-python-lib requests
+      - name: Extract components and create matrix.json
+        id: extract_components
         run: |
-          python -m pip install --upgrade pip
-          pip install requests packaging cyclonedx-python-lib==0.11.1 spdx-tools
-      - name: Build matrix from SBOMs
-        id: build_matrix
-        run: python prepare_matrix.py
-        env:
-          SBOMS: "${{ github.event.inputs.sbom_paths || 'sboms/spdx-lite.json,sboms/cyclonedx.json' }}"
-          TITLE: "${{ github.event.inputs.notice_title || 'Open Source Notices' }}"
+          python scripts/extract_components.py --spdx ${{ github.event.inputs.spdx_json }} --cdx ${{ github.event.inputs.cyclonedx_json }}
       - name: Show matrix.json content (debug)
         run: cat matrix.json
       - name: Set outputs
@@ -46,73 +37,42 @@ jobs:
           echo "matrix_json<<EOF" >> $GITHUB_OUTPUT
           cat matrix.json >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
-          echo "title=${{ github.event.inputs.notice_title || 'Open Source Notices' }}" >> $GITHUB_OUTPUT
 
-  show_summary:
-    runs-on: ubuntu-latest
-    needs: prepare
-    steps:
-      - name: Show components count
-        run: |
-          echo "### Prepared components for scanning"
-          python -c "import json, os; m=json.loads(os.environ['M']); print(f'- Components to scan: {len(m.get(\"include\", []))}')"
-        env:
-          M: ${{ needs.prepare.outputs.matrix_json }}
-
-  scan_components:
+  scan:
     needs: prepare
     runs-on: ubuntu-latest
     strategy:
       matrix: ${{ fromJson(needs.prepare.outputs.matrix_json) }}
-      max-parallel: 12
+      max-parallel: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-      - name: Install scan dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install scancode-toolkit requests packaging
-      - name: Download and scan component source
-        run: python download_and_scan.py
-        env:
-          NAME: ${{ matrix.name }}
-          VERSION: ${{ matrix.version }}
-          URL: ${{ matrix.url }}
-          PURL: ${{ matrix.purl }}
-          SAFE_NAME: ${{ matrix.safe_name }}
+          python-version: '3.12'
+      - name: Install ScanCode Toolkit
+        run: pip install scancode-toolkit
+      - name: Download source and scan component
+        run: python scripts/download_and_scan.py --component "${{ matrix.component }}" --version "${{ matrix.version }}" --purl "${{ matrix.purl }}" --url "${{ matrix.url }}"
+      - name: Upload ScanCode result
+        uses: actions/upload-artifact@v4
+        with:
+          name: scancode-${{ matrix.component }}
+          path: scan-results/${{ matrix.component }}.json
 
-  merge:
-    needs: [prepare, scan_components]
+  aggregate:
+    needs: scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Download all scan artifacts
+      - name: Download all ScanCode results
         uses: actions/download-artifact@v4
         with:
-          pattern: "scan-*"
-          path: scans
-      - uses: actions/setup-python@v5
+          path: scan-results
+      - name: Aggregate copyrights
+        run: python scripts/aggregate_copyrights.py
+      - name: Upload copyrights artifact
+        uses: actions/upload-artifact@v4
         with:
-          python-version: "3.12"
-      - name: Install helper libs
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests packaging
-      - name: Build NOTICE.md from scan data
-        run: python build_notice.py
-        env:
-          TITLE: ${{ needs.prepare.outputs.title }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: notice-md
-          path: NOTICE.md
-      - name: Commit NOTICE.md back (optional)
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add NOTICE.md
-          git diff --cached --quiet || git commit -m "chore: update NOTICE.md (matrix ScanCode)"
-          git push
+          name: copyrights
+          path: copyrights.txt
