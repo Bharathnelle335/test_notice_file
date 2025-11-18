@@ -29,7 +29,6 @@ jobs:
         with:
           python-version: '3.11'
 
-      # NOTE: no python3-distutils on Ubuntu 24.04. Keep deps minimal.
       - name: Install minimal prerequisites
         run: |
           set -euo pipefail
@@ -214,9 +213,7 @@ jobs:
           python -m venv .venv
           . .venv/bin/activate
           python -m pip install --upgrade pip
-          # Install ScanCode CLI
           pip install "scancode-toolkit==32.4.1"
-          # sanity check
           .venv/bin/scancode --version
           echo "SCANCODE=.venv/bin/scancode" >> "$GITHUB_ENV"
 
@@ -348,7 +345,7 @@ jobs:
 
                       expr = fe.get("detected_license_expression") or fe.get("license_expression") or ""
                       if expr:
-                          for token in re.split(r'\\s+(AND|OR|WITH)\\s+', expr):
+                          for token in re.split(r'\s+(AND|OR|WITH)\s+', expr):
                               token = token.strip()
                               if token and token not in {"AND","OR","WITH"}:
                                   unique_license_keys.add(token)
@@ -356,7 +353,7 @@ jobs:
                       for det in fe.get("license_detections", []) or []:
                           k = det.get("license_expression") or det.get("license_expression_spdx") or ""
                           if k:
-                              for token in re.split(r'\\s+(AND|OR|WITH)\\s+', k):
+                              for token in re.split(r'\s+(AND|OR|WITH)\s+', k):
                                   token = token.strip()
                                   if token and token not in {"AND","OR","WITH"}:
                                       unique_license_keys.add(token)
@@ -370,7 +367,7 @@ jobs:
                   for det in data.get("license_detections", []) or []:
                       k = det.get("license_expression") or det.get("license_expression_spdx") or ""
                       if k:
-                          for token in re.split(r'\\s+(AND|OR|WITH)\\s+', k):
+                          for token in re.split(r'\s+(AND|OR|WITH)\s+', k):
                               token = token.strip()
                               if token and token not in {"AND","OR","WITH"}:
                                   unique_license_keys.add(token)
@@ -407,7 +404,7 @@ jobs:
 
           if SUMMARY_PATH:
               with open(SUMMARY_PATH, "a", encoding="utf-8") as sf:
-                  sf.write("\\n".join(md) + "\\n")
+                  sf.write("\n".join(md) + "\n")
 
           print(f"Wrote artifacts/component_copyrights.json for {len(results)} components.")
           PY
@@ -420,10 +417,172 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: Upload final aggregated copyrights + licenses
+      - name: Upload final aggregated copyrights + licenses (JSON)
         uses: actions/upload-artifact@v4
         with:
           name: component-copyrights-licenses
-          path: artifacts/component_copyrights.json 
+          path: artifacts/component_copyrights.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Build per-component attribution file (YAML)
+        run: |
+          set -euo pipefail
+          python - << 'PY'
+          import json, os, re, sys
+
+          # ---- helpers ----
+          def sanitize(s):
+              import re
+              return re.sub(r'[^A-Za-z0-9_.-]+', '-', (s or "")).strip('-') or "unknown"
+
+          def esc_yaml(s):
+              # Quote if contains special YAML chars or leading/trailing spaces
+              if s is None: 
+                  return '""'
+              if re.search(r'[:#\\-\\[\\]\\{\\},&*?]|^\\s|\\s$', s):
+                  return '"' + s.replace('"', '\\"') + '"'
+              return s
+
+          def write_yaml(items, path):
+              lines = []
+              lines.append("components:")
+              for it in items:
+                  lines.append("  - component: " + esc_yaml(it["component"]))
+                  if it.get("version") is not None:
+                      lines.append("    version: " + esc_yaml(it["version"]))
+                  lines.append("    url: " + esc_yaml(it.get("url") or ""))
+                  lines.append("    license: " + esc_yaml(it.get("license") or ""))
+                  cps = it.get("copyrights") or []
+                  if cps:
+                      lines.append("    copyrights:")
+                      for c in cps:
+                          lines.append("      - " + esc_yaml(c))
+                  else:
+                      lines.append("    copyrights: []")
+              with open(path, "w", encoding="utf-8") as f:
+                  f.write("\\n".join(lines) + "\\n")
+
+          # ---- load inputs ----
+          try:
+              with open("artifacts/components.json", "r", encoding="utf-8") as f:
+                  components = json.load(f).get("components", [])
+          except Exception as e:
+              print(f"FATAL: cannot read artifacts/components.json: {e}")
+              sys.exit(1)
+
+          # aggregated JSON fallback (if raw is missing)
+          agg = {}
+          try:
+              with open("artifacts/component_copyrights.json", "r", encoding="utf-8") as f:
+                  agg_data = json.load(f)
+              for c in (agg_data.get("components") or []):
+                  agg[c.get("component")] = c
+          except Exception as e:
+              # not fatal; we can still proceed relying on raw files only
+              print(f"WARNING: cannot read aggregated JSON, will use raw only: {e}")
+
+          def load_raw(component_name):
+              p = os.path.join("scancode_results", sanitize(component_name) + ".json")
+              if os.path.exists(p):
+                  try:
+                      with open(p, "r", encoding="utf-8") as f:
+                          return json.load(f)
+                  except Exception as e:
+                      print(f"WARNING: failed to parse raw JSON for {component_name}: {e}")
+              else:
+                  print(f"INFO: raw JSON not found for {component_name}: {p}")
+              return None
+
+          def top_spdx_license_from_data(data):
+              counts = {}
+              def bump(key):
+                  if not key: return
+                  k = key.strip()
+                  if k:
+                      counts[k] = counts.get(k, 0) + 1
+
+              if not data:
+                  return None
+
+              # per-file
+              for fe in data.get("files", []) or []:
+                  bump(fe.get("detected_license_expression_spdx"))
+                  for det in fe.get("license_detections", []) or []:
+                      bump(det.get("license_expression_spdx"))
+                  for lic in fe.get("licenses", []) or []:
+                      bump(lic.get("spdx_license_key"))
+
+              # codebase-level detections
+              for det in data.get("license_detections", []) or []:
+                  bump(det.get("license_expression_spdx"))
+
+              if not counts: 
+                  return None
+              return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
+
+          def top_spdx_license_from_agg(agg_entry):
+              counts = {}
+              if not agg_entry:
+                  return None
+              # use unique_keys collected
+              for k in agg_entry.get("licenses", {}).get("unique_keys", []) or []:
+                  if k:
+                      counts[k] = counts.get(k, 0) + 1
+              if not counts:
+                  return None
+              return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
+
+          def collect_copyrights_from_data(data):
+              out = set()
+              if not data:
+                  return []
+              for fe in data.get("files", []) or []:
+                  for c in fe.get("copyrights", []) or []:
+                      val = (c.get("copyright") or "").strip()
+                      if val:
+                          out.add(val)
+              return sorted(out)
+
+          def collect_copyrights_from_agg(agg_entry):
+              if not agg_entry:
+                  return []
+              return list(agg_entry.get("copyrights", {}).get("unique_statements", []))
+
+          # ---- build entries ----
+          entries = []
+          for comp in components:
+              name = comp.get("component")
+              version = comp.get("version")
+              url = comp.get("git_url")
+
+              raw = load_raw(name)
+              agg_entry = agg.get(name)
+
+              # license selection
+              primary_spdx = top_spdx_license_from_data(raw) or top_spdx_license_from_agg(agg_entry)
+
+              # copyright collection
+              copyrights = collect_copyrights_from_data(raw) or collect_copyrights_from_agg(agg_entry)
+
+              entries.append({
+                  "component": name,
+                  "version": version,
+                  "url": url,
+                  "license": primary_spdx,
+                  "copyrights": copyrights,
+              })
+
+          os.makedirs("artifacts", exist_ok=True)
+          out_yaml = "artifacts/component_attribution.yaml"
+          write_yaml(entries, out_yaml)
+          print(f"Wrote {out_yaml} with {len(entries)} components.")
+          PY
+
+      - name: Upload per-component attribution (YAML)
+        uses: actions/upload-artifact@v4
+        with:
+          name: component-attribution
+          path: artifacts/component_attribution.yaml
           if-no-files-found: error
           retention-days: 30
