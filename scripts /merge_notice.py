@@ -17,7 +17,9 @@ for p in scans_dir.glob("**/scan.json"):
 
     # Extract component name and simplify to last part after '/'
     raw_name = meta_d.get("name") or p.parent.name
-    name = raw_name.split("/")[-1] if raw_name else ""
+    # Normalize repo tail as component name
+last = raw_name.split('/')[-1] if raw_name else ''
+name = last.split('@')[0] if last else ''
 
     version = meta_d.get("version") or ""
     url = meta_d.get("url") or ""
