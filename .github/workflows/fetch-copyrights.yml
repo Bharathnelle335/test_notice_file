@@ -111,12 +111,12 @@ jobs:
 
           # ---- License extraction from SBOMs ----
           def pick_spdx_license_from_spdx(pkg) -> str|None:
-              # Prefer licenseConcluded, else licenseDeclared (these may be SPDX or LicenseRef)
+              # Prefer licenseConcluded, else licenseDeclared
               lic = pkg.get("licenseConcluded") or pkg.get("licenseDeclared")
               return (lic or None)
 
           def pick_spdx_license_from_cdx(comp) -> str|None:
-              # CycloneDX component.licenses: [{license: {id: SPDX, name:..., url:...}}] or {expression: SPDX expr}
+              # CycloneDX component.licenses: [{license: {id: SPDX}}] or {expression: SPDX expr}
               for lic in comp.get("licenses", []) or []:
                   lobj = lic.get("license") or {}
                   spdx_id = lobj.get("id")
@@ -183,7 +183,6 @@ jobs:
               for p in pkgs:
                   name = last_segment(p.get("name") or p.get("packageName"))
                   version = clean_version(p.get("versionInfo"))
-                  # purl from externalRefs
                   purl = None
                   for ref in p.get("externalRefs", []) or []:
                       rtype = (ref.get("referenceType") or ref.get("type") or "").lower()
@@ -242,7 +241,7 @@ jobs:
           .venv/bin/scancode --version
           echo "SCANCODE=.venv/bin/scancode" >> "$GITHUB_ENV"
 
-      # ========= Clone & Scan (copyright + license for detection, but we do NOT use license for attribution) =========
+      # ========= Clone & Scan =========
       - name: Clone repos and run ScanCode (copyright + license)
         env:
           SCANCODE: ${{ env.SCANCODE }}
@@ -269,7 +268,7 @@ jobs:
               git_url = item.get("git_url")
 
               if not name or not git_url:
-                  # Skip if no repo URL
+                  # Write an empty scan result to keep pipeline consistent
                   out_json = os.path.join("scancode_results", sanitize(name) + ".json")
                   with open(out_json, "w", encoding="utf-8") as f:
                       json.dump({"files": []}, f)
@@ -281,7 +280,6 @@ jobs:
                       p = run(f"git clone --depth 1 --branch {shlex.quote(version)} {shlex.quote(git_url)} {shlex.quote(dest)}")
                       if p.returncode != 0:
                           print(p.stdout)
-                          # still create an empty scan result to keep pipeline consistent
                           out_json = os.path.join("scancode_results", sanitize(name) + ".json")
                           with open(out_json, "w", encoding="utf-8") as f:
                               json.dump({"files": []}, f)
@@ -306,11 +304,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: scancode-raw
-          path: scancode_results/*.json
+        # Upload directory to include all per-component files
+          path: scancode_results
           if-no-files-found: ignore
           retention-days: 7
 
-      # ========= Aggregate copyrights (we will NOT use ScanCode license downstream) =========
+      # ========= Aggregate copyrights (JSON) — FIXED to parse both shapes =========
       - name: Aggregate copyrights (JSON)
         run: |
           set -euo pipefail
@@ -334,29 +333,41 @@ jobs:
               name = item.get("component")
               version = item.get("version")
               git_url = item.get("git_url")
-              sbom_license = item.get("license")  # from SBOMs (SPDX/CycloneDX)
+              sbom_license = item.get("license")  # from SBOM
 
               data = load_raw(name)
 
-              unique_copyrights = set()
-              per_file_copyrights = []
+              unique = set()
+              per_file = []
 
               for fe in data.get("files", []) or []:
                   path = fe.get("path") or fe.get("location") or ""
+
                   file_statements = []
                   holders = []
+
                   for c in fe.get("copyrights", []) or []:
-                      for stmt in c.get("statements", []) or []:
-                          s = (stmt or "").strip()
+                      # Shape A: a single string
+                      single = (c.get("copyright") or "").strip()
+                      if single:
+                          file_statements.append(single)
+                          unique.add(single)
+
+                      # Shape B: list of statements
+                      for s in c.get("statements", []) or []:
+                          s = (s or "").strip()
                           if s:
                               file_statements.append(s)
-                              unique_copyrights.add(s)
+                              unique.add(s)
+
+                      # Optional holders
                       for h in c.get("holders", []) or []:
                           h = (h or "").strip()
                           if h:
                               holders.append(h)
+
                   if file_statements or holders:
-                      per_file_copyrights.append({
+                      per_file.append({
                           "path": path,
                           "statements": file_statements,
                           "holders": holders
@@ -366,10 +377,10 @@ jobs:
                   "component": name,
                   "version": version,
                   "git_url": git_url,
-                  "license": sbom_license,  # keep SBOM license here too
+                  "license": sbom_license,  # keep SBOM license in the record
                   "copyrights": {
-                      "unique_statements": sorted(unique_copyrights),
-                      "per_file": per_file_copyrights
+                      "unique_statements": sorted(unique),
+                      "per_file": per_file
                   }
               })
 
@@ -394,11 +405,9 @@ jobs:
           python - << 'PY'
           import json, os, re
 
-          # Load components with SBOM licenses
           with open("artifacts/components.json", "r", encoding="utf-8") as f:
               components = json.load(f).get("components", [])
 
-          # Load aggregated copyrights (built from raw ScanCode)
           with open("artifacts/component_copyrights.json", "r", encoding="utf-8") as f:
               agg = json.load(f).get("components", [])
 
@@ -508,4 +517,3 @@ jobs:
           name: component-attribution-text
           path: artifacts/component_attribution.txt
           if-no-files-found: error
-          retention-days: 30
