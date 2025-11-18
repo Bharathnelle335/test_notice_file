@@ -1,4 +1,4 @@
-name: Extract components & fetch copyrights
+name: Extract components & fetch copyrights + licenses
 
 on:
   workflow_dispatch:
@@ -36,7 +36,7 @@ jobs:
           sudo apt-get install -y git-lfs xz-utils
           git lfs install
 
-      - name: Generate components.json from SBOMs
+      - name: Generate components.json from SBOMs (infer git_url; omit unknown version)
         run: |
           set -euo pipefail
           python - << 'PY'
@@ -49,6 +49,19 @@ jobs:
               if not os.path.exists(path): return None
               with open(path, 'r', encoding='utf-8') as f: return json.load(f)
 
+          def is_git_host(url: str|None) -> bool:
+              if not url: return False
+              u = url.lower()
+              return ("github.com" in u) or ("gitlab.com" in u) or ("bitbucket.org" in u) or u.startswith(("git://", "git@", "ssh://"))
+
+          def normalize_git_url(url: str|None) -> str|None:
+              if not url: return None
+              url = url.strip()
+              if url.startswith("http") and is_git_host(url) and not url.endswith(".git"):
+                  url = url.rstrip("/")
+                  url += ".git"
+              return url
+
           def last_segment(name: str|None):
               if not name: return None
               s = name
@@ -57,11 +70,6 @@ jobs:
               return s
 
           def extract_from_purl(purl):
-              """
-              component: last path segment of the purl before @version
-              version: from @version if present
-              git_url: inferred for GitHub/GitLab/Bitbucket purls
-              """
               if not purl: return (None, None, None)
               s = purl.strip()
               if s.startswith("pkg:"): s = s[4:]
@@ -71,13 +79,53 @@ jobs:
               if '@' in s:
                   base, version = s.rsplit('@', 1)
               component = urllib.parse.unquote(base.split('/')[-1])
-              git_url = None
               m = re.search(r'(github\\.com|gitlab\\.com|bitbucket\\.org)/([^/?#]+)/([^/?#]+)', base)
+              git_url = None
               if m:
                   host, owner, repo = m.groups()
                   repo = repo.rstrip('.git')
                   git_url = f"https://{host}/{owner}/{repo}.git"
               return (component, version, git_url)
+
+          def clean_version(ver: str|None) -> str|None:
+              if not ver: return None
+              v = ver.strip().lower()
+              if v in {"", "unknown", "n/a", "na", "none"}:
+                  return None
+              return ver.strip()
+
+          def best_git_url_from_spdx(pkg) -> str|None:
+              if not pkg: return None
+              for ref in pkg.get("externalRefs", []) or []:
+                  rtype = (ref.get("referenceType") or ref.get("type") or "").lower()
+                  loc = ref.get("referenceLocator") or ref.get("locator") or ""
+                  if is_git_host(loc) or rtype in {"vcs", "repository", "scm"}:
+                      u = normalize_git_url(loc)
+                      if u: return u
+              dl = pkg.get("downloadLocation") or ""
+              if is_git_host(dl):
+                  u = normalize_git_url(dl)
+                  if u: return u
+              hp = pkg.get("homepage") or ""
+              if is_git_host(hp):
+                  u = normalize_git_url(hp)
+                  if u: return u
+              return None
+
+          def best_git_url_from_cdx(comp, purl) -> str|None:
+              if comp:
+                  for ref in comp.get("externalReferences", []) or []:
+                      rtype = (ref.get("type") or "").lower()
+                      url = ref.get("url") or ref.get("locator") or ""
+                      if is_git_host(url) or rtype in {"vcs", "repository", "scm", "source"}:
+                          u = normalize_git_url(url)
+                          if u: return u
+                  url = comp.get("repository") or ""
+                  if is_git_host(url):
+                      u = normalize_git_url(url)
+                      if u: return u
+              name_p, ver_p, git_p = extract_from_purl(purl) if purl else (None, None, None)
+              return git_p
 
           def parse_cyclonedx(path):
               out = []
@@ -87,8 +135,9 @@ jobs:
                   purl = c.get("purl")
                   name_p, ver_p, git_p = extract_from_purl(purl) if purl else (None, None, None)
                   name = name_p or last_segment(c.get("name"))
-                  version = c.get("version") or ver_p
-                  git_url = git_p
+                  version = clean_version(c.get("version") or ver_p)
+                  git_url = best_git_url_from_cdx(c, purl) or git_p
+                  git_url = normalize_git_url(git_url)
                   if name:
                       out.append({"component": name, "version": version, "git_url": git_url})
               return out
@@ -100,23 +149,23 @@ jobs:
               pkgs = data.get("packages") or []
               for p in pkgs:
                   name = last_segment(p.get("name") or p.get("packageName"))
-                  version = p.get("versionInfo")
+                  version = clean_version(p.get("versionInfo"))
                   purl = None
                   for ref in p.get("externalRefs", []) or []:
                       rtype = (ref.get("referenceType") or ref.get("type") or "").lower()
-                      loc = ref.get("referenceLocator") or ref.get("locator")
+                      loc = ref.get("referenceLocator") or ref.get("locator") or ""
                       if rtype == "purl" and loc:
                           purl = loc
                           break
                   name_p, ver_p, git_p = extract_from_purl(purl) if purl else (None, None, None)
                   if name_p: name = name_p
-                  if not version: version = ver_p
-                  git_url = git_p
+                  if not version: version = clean_version(ver_p)
+                  git_url = best_git_url_from_spdx(p) or git_p
+                  git_url = normalize_git_url(git_url)
                   if name:
                       out.append({"component": name, "version": version, "git_url": git_url})
               return out
 
-          # Parse, merge, de-duplicate
           comps = parse_cyclonedx(CDX_PATH) + parse_spdx(SPDX_PATH)
           seen, result = set(), []
           for c in comps:
@@ -154,7 +203,7 @@ jobs:
           echo "SCANCODE_DIR=$PWD/$SCANCODE_DIR" >> "$GITHUB_ENV"
           echo "Installed ScanCode at $SCANCODE_DIR"
 
-      - name: Clone repos and run ScanCode (simple version rule)
+      - name: Clone repos and run ScanCode (copyright + license) with per-component summary
         env:
           SCANCODE: ${{ env.SCANCODE }}
         run: |
@@ -163,6 +212,8 @@ jobs:
           import json, os, subprocess, shlex, re
 
           SCANCODE = os.environ["SCANCODE"]
+          SUMMARY = os.environ.get("GITHUB_STEP_SUMMARY")
+
           with open("artifacts/components.json", "r", encoding="utf-8") as f:
               comps = json.load(f).get("components", [])
 
@@ -174,17 +225,31 @@ jobs:
               print("+", cmd)
               return subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
+          md = []
+          md.append("## Component-wise Scan Summary")
+          md.append("")
+          md.append("| Component | Version | Repo URL | Checkout | Status | #Copyrights | Licenses |")
+          md.append("|---|---|---|---|---|---:|---|")
+
           results = []
           for item in comps:
               name = item.get("component")
-              version = item.get("version")
+              version = item.get("version")  # None => default branch
               git_url = item.get("git_url")
 
               if not name:
                   continue
 
+              checkout_desc = "default branch" if not version else f"tag/branch `{version}`"
+              status = "skipped"
+              copy_count = 0
+              license_keys_preview = "-"
+
               if not git_url:
-                  results.append({"component": name, "version": version, "git_url": git_url, "copyrights": []})
+                  results.append({"component": name, "version": version, "git_url": git_url,
+                                  "copyrights": {"unique_statements": [], "per_file": []},
+                                  "licenses": {"unique_keys": [], "per_file": []}})
+                  md.append(f"| `{name}` | {version or ''} | *(none)* | {checkout_desc} | skipped | 0 | - |")
                   continue
 
               dest = os.path.join("repos", sanitize(name) + (f"-{sanitize(version)}" if version else ""))
@@ -193,49 +258,119 @@ jobs:
                       p = run(f"git clone --depth 1 --branch {shlex.quote(version)} {shlex.quote(git_url)} {shlex.quote(dest)}")
                       if p.returncode != 0:
                           print(p.stdout)
-                          results.append({"component": name, "version": version, "git_url": git_url, "copyrights": []})
+                          status = "clone failed"
+                          results.append({"component": name, "version": version, "git_url": git_url,
+                                          "copyrights": {"unique_statements": [], "per_file": []},
+                                          "licenses": {"unique_keys": [], "per_file": []}})
+                          md.append(f"| `{name}` | {version or ''} | {git_url} | {checkout_desc} | {status} | 0 | - |")
                           continue
                   else:
                       p = run(f"git clone --depth 1 {shlex.quote(git_url)} {shlex.quote(dest)}")
                       if p.returncode != 0:
                           print(p.stdout)
-                          results.append({"component": name, "version": version, "git_url": git_url, "copyrights": []})
+                          status = "clone failed"
+                          results.append({"component": name, "version": version, "git_url": git_url,
+                                          "copyrights": {"unique_statements": [], "per_file": []},
+                                          "licenses": {"unique_keys": [], "per_file": []}})
+                          md.append(f"| `{name}` | {version or ''} | {git_url} | {checkout_desc} | {status} | 0 | - |")
                           continue
 
               out_json = os.path.join("scancode_results", sanitize(name) + ".json")
-              cmd = f"{shlex.quote(SCANCODE)} --copyright --strip-root --json-pp {shlex.quote(out_json)} {shlex.quote(dest)}"
+              cmd = f"{shlex.quote(SCANCODE)} --copyright --license --strip-root --json-pp {shlex.quote(out_json)} {shlex.quote(dest)}"
               p = run(cmd)
               if p.returncode != 0:
                   print(p.stdout)
 
-              copyrights = set()
+              unique_copyrights = set()
+              per_file_copyrights = []
+              unique_license_keys = set()
+              per_file_licenses = []
+
               try:
                   with open(out_json, "r", encoding="utf-8") as f:
                       data = json.load(f)
                   for file_entry in data.get("files", []):
-                      for c in file_entry.get("copyrights", []):
+                      path = file_entry.get("path") or file_entry.get("location") or ""
+                      # Copyrights
+                      file_statements = []
+                      holders = []
+                      for c in file_entry.get("copyrights", []) or []:
                           for stmt in c.get("statements", []) or []:
-                              stmt = (stmt or "").strip()
                               if stmt:
-                                  copyrights.add(stmt)
+                                  s = stmt.strip()
+                                  if s:
+                                      file_statements.append(s)
+                                      unique_copyrights.add(s)
+                          for h in c.get("holders", []) or []:
+                              if h:
+                                  holders.append(h.strip())
+                      if file_statements or holders:
+                          per_file_copyrights.append({
+                              "path": path,
+                              "statements": file_statements,
+                              "holders": holders
+                          })
+
+                      # Licenses
+                      detected_expr = file_entry.get("detected_license_expression") or ""
+                      lic_items = []
+                      for lic in file_entry.get("licenses", []) or []:
+                          key = lic.get("key")
+                          if key:
+                              unique_license_keys.add(key)
+                          lic_items.append({
+                              "key": lic.get("key"),
+                              "spdx_key": lic.get("spdx_license_key"),
+                              "score": lic.get("score"),
+                              "start_line": lic.get("start_line"),
+                              "end_line": lic.get("end_line")
+                          })
+                      if detected_expr or lic_items:
+                          per_file_licenses.append({
+                              "path": path,
+                              "detected_expression": detected_expr,
+                              "licenses": lic_items
+                          })
               except Exception as e:
                   print(f"Parse failed for {name}: {e}")
+
+              copy_count = len(unique_copyrights)
+              status = "scanned"
+              # Show up to 3 license keys in summary
+              if unique_license_keys:
+                  preview = sorted(unique_license_keys)[:3]
+                  license_keys_preview = ", ".join(preview) + ("…" if len(unique_license_keys) > 3 else "-")
 
               results.append({
                   "component": name,
                   "version": version,
                   "git_url": git_url,
-                  "copyrights": sorted(copyrights)
+                  "copyrights": {
+                      "unique_statements": sorted(unique_copyrights),
+                      "per_file": per_file_copyrights
+                  },
+                  "licenses": {
+                      "unique_keys": sorted(unique_license_keys),
+                      "per_file": per_file_licenses
+                  }
               })
+
+              md.append(f"| `{name}` | {version or ''} | {git_url} | {checkout_desc} | {status} | {copy_count} | {license_keys_preview} |")
 
           os.makedirs("artifacts", exist_ok=True)
           with open("artifacts/component_copyrights.json", "w", encoding="utf-8") as f:
               json.dump({"components": results}, f, indent=2, ensure_ascii=False)
 
+          # Write Markdown summary (GitHub UI)
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary_path:
+              with open(summary_path, "a", encoding="utf-8") as sf:
+                  sf.write("\\n".join(md) + "\\n")
+
           print(f"Wrote artifacts/component_copyrights.json for {len(results)} components.")
           PY
 
-      - name: Upload raw ScanCode outputs (optional)
+      - name: Upload raw ScanCode outputs (per-repo)
         uses: actions/upload-artifact@v4
         with:
           name: scancode-raw
@@ -243,10 +378,10 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: Upload final aggregated copyrights
+      - name: Upload final aggregated copyrights + licenses
         uses: actions/upload-artifact@v4
         with:
-          name: component-copyrights
+          name: component-copyrights-licenses
           path: artifacts/component_copyrights.json
           if-no-files-found: error
           retention-days: 30
