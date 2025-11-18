@@ -43,4 +43,4 @@ jobs:
           path: |
             NOTICE.md
             NOTICE-with-scancode.md
-            components.json
+            components.json 
