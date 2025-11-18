@@ -38,7 +38,7 @@ jobs:
       - name: Set outputs
         id: set_outputs
         run: |
-          CONTENT=$(cat matrix.json)
+          CONTENT=$(python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))' < matrix.json)
           echo "matrix_json=$CONTENT" >> $GITHUB_OUTPUT
           echo "title=${{ github.event.inputs.notice_title || 'Open Source Notices' }}" >> $GITHUB_OUTPUT
 
