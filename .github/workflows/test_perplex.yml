@@ -11,6 +11,7 @@ on:
         description: "Title for NOTICE.md"
         required: false
         default: "Open Source Notices"
+
   push:
     branches: [ main, master ]
     paths:
@@ -20,8 +21,8 @@ jobs:
   prepare:
     runs-on: ubuntu-latest
     outputs:
-      matrix_json: ${{ steps.mk.outputs.matrix_json }}
-      title: ${{ steps.mk.outputs.title }}
+      matrix_json: ${{ steps.build.outputs.matrix_json }}
+      title: ${{ steps.build.outputs.title }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,15 +33,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests packaging cyclonedx-python-lib==0.11.1 spdx-tools
       - name: Build matrix from SBOMs
-        id: mk
-        run: python prepare_matrix.py
-        env:
-          SBOMS: "${{ github.event.inputs.sbom_paths || 'sboms/spdx-lite.json,sboms/cyclonedx.json' }}"
-          TITLE: "${{ github.event.inputs.notice_title || 'Open Source Notices' }}"
-      - name: Set outputs
+        id: build
         run: |
+          # Save matrix JSON to a file
+          python prepare_matrix.py > matrix.json
+          # Output the JSON and title
           echo "matrix_json=$(cat matrix.json)" >> $GITHUB_OUTPUT
-          echo "title=${{ env.TITLE }}" >> $GITHUB_OUTPUT
+          echo "title=${{ github.event.inputs.notice_title || 'Open Source Notices' }}" >> $GITHUB_OUTPUT
 
   show_summary:
     runs-on: ubuntu-latest
@@ -49,13 +48,9 @@ jobs:
       - name: Show components count
         run: |
           echo "### Prepared components for scanning"
-          python -c '
-import json, os
-m=json.loads(os.environ["M"])
-print(f"- Components to scan: {len(m.get(\"include\", []))}")
-'
+          python -c "import json, os; m=json.loads(os.environ['M']); print(f'- Components to scan: {len(m.get(\"include\", []))}')"
         env:
-          M: ${{ steps.mk.outputs.matrix_json }}
+          M: ${{ needs.prepare.outputs.matrix_json }}
 
   scan_components:
     needs: prepare
@@ -99,10 +94,12 @@ print(f"- Components to scan: {len(m.get(\"include\", []))}")
           python -m pip install --upgrade pip
           pip install requests packaging
       - name: Build NOTICE.md from scan data
-        run: python build_notice.py
+        run: |
+          python build_notice.py
         env:
           TITLE: ${{ needs.prepare.outputs.title }}
-      - uses: actions/upload-artifact@v4
+      - name: Upload NOTICE.md artifact
+        uses: actions/upload-artifact@v4
         with:
           name: notice-md
           path: NOTICE.md
