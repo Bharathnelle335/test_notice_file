@@ -22,6 +22,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Validate SBOM files exist
+        shell: bash
         run: |
           set -euo pipefail
           test -f "sboms/spdx-lite.json" || { echo "Missing sboms/spdx-lite.json" >&2; exit 1; }
@@ -33,6 +34,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install minimal prerequisites
+        shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
@@ -42,6 +44,7 @@ jobs:
       # ========= Parse SBOMs → components.json (license from SBOMs) =========
       - name: Generate components.json (URL logic: ignore generic purl, add narrow pkg-locator fallback; HARD FAIL on missing URLs)
         id: generate
+        shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -249,6 +252,7 @@ jobs:
 
       - name: Split components into parts of 5
         id: split
+        shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -294,6 +298,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install minimal prerequisites
+        shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
@@ -302,6 +307,7 @@ jobs:
 
       - name: Create venv & install ScanCode (PyPI, pinned 32.4.1)
         id: install_scancode
+        shell: bash
         run: |
           set -euo pipefail
           python -m venv .venv
@@ -309,7 +315,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install "scancode-toolkit==32.4.1"
           .venv/bin/scancode --version
-          echo "SCANCODE=.venv/bin/scancode" >> "$GITHUB_ENV"
+          echo "SCANCODE=$GITHUB_WORKSPACE/.venv/bin/scancode" >> "$GITHUB_ENV"
 
       - name: Download base parts
         uses: actions/download-artifact@v4
@@ -321,13 +327,13 @@ jobs:
         env:
           SCANCODE: ${{ env.SCANCODE }}
           PART_INDEX: ${{ matrix.part }}
+        shell: bash
         run: |
           set -euo pipefail
           PART_FILE="artifacts/parts/components_part_${PART_INDEX}.json"
           [[ -f "$PART_FILE" ]] || { echo "Missing $PART_FILE"; exit 1; }
           python - <<'PY'
           import json, os, subprocess, shlex, re
-          import sys
           part_index = os.environ["PART_INDEX"]
           SCANCODE = os.environ["SCANCODE"]
           with open(f"artifacts/parts/components_part_{part_index}.json","r",encoding="utf-8") as f:
@@ -396,6 +402,7 @@ jobs:
       - name: Aggregate copyrights (JSON) for this part
         env:
           PART_INDEX: ${{ matrix.part }}
+        shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -482,6 +489,7 @@ jobs:
       - name: Build attribution (YAML + TXT) for this part
         env:
           PART_INDEX: ${{ matrix.part }}
+        shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -564,10 +572,9 @@ jobs:
         with:
           name: component-attribution-text-part-${{ matrix.part }}
           path: artifacts/component_attribution_part_${{ matrix.part }}.txt
-          if-no-files-found: error
-          retention-days: 30
+        # Note: overwrite not supported for per-part here (unique names)
 
-      # ======= NEW: cumulative PROGRESS build (append all results so far) =======
+      # ======= Cumulative PROGRESS build (append results so far) =======
       - name: Download all available part JSONs (so far)
         uses: actions/download-artifact@v4
         with:
@@ -582,6 +589,7 @@ jobs:
           path: artifacts
 
       - name: Build cumulative PROGRESS (JSON + YAML + TXT) from available parts
+        shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -713,6 +721,7 @@ jobs:
           path: artifacts/parts_agg
 
       - name: Merge per-part copyrights → final JSON (order preserved)
+        shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -767,6 +776,7 @@ jobs:
           retention-days: 30
 
       - name: Build final attribution (YAML + TXT) (order preserved)
+        shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -849,4 +859,3 @@ jobs:
           name: component-attribution-text
           path: artifacts/component_attribution.txt
           if-no-files-found: error
-          retention-days: 30
