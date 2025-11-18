@@ -1,4 +1,4 @@
-name: Generate NOTICE (paged matrix + ScanCode, 4 per page, artifacts only)
+name: test1_formatted Generate NOTICE (paged matrix + ScanCode, 4 per page, artifacts only)
 
 on:
   workflow_dispatch:
