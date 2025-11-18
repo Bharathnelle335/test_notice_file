@@ -36,7 +36,8 @@ jobs:
           sudo apt-get install -y xz-utils bzip2 zlib1g libxml2-dev libxslt1-dev git-lfs
           git lfs install
 
-      - name: Generate components.json from SBOMs (robust git_url; treat unknown version as null)
+      # ========= Parse SBOMs → components.json (with license from SBOMs) =========
+      - name: Generate components.json from SBOMs (component, version|null, git_url, license)
         run: |
           set -euo pipefail
           python - << 'PY'
@@ -108,6 +109,24 @@ jobs:
                   return None
               return ver.strip()
 
+          # ---- License extraction from SBOMs ----
+          def pick_spdx_license_from_spdx(pkg) -> str|None:
+              # Prefer licenseConcluded, else licenseDeclared (these may be SPDX or LicenseRef)
+              lic = pkg.get("licenseConcluded") or pkg.get("licenseDeclared")
+              return (lic or None)
+
+          def pick_spdx_license_from_cdx(comp) -> str|None:
+              # CycloneDX component.licenses: [{license: {id: SPDX, name:..., url:...}}] or {expression: SPDX expr}
+              for lic in comp.get("licenses", []) or []:
+                  lobj = lic.get("license") or {}
+                  spdx_id = lobj.get("id")
+                  expr = lic.get("expression")
+                  if expr:
+                      return expr
+                  if spdx_id:
+                      return spdx_id
+              return None
+
           def best_git_url_from_spdx(pkg) -> str|None:
               if not pkg: return None
               for ref in pkg.get("externalRefs", []) or []:
@@ -150,10 +169,10 @@ jobs:
                   name_p, ver_p, git_p = extract_from_purl(purl) if purl else (None, None, None)
                   name = name_p or last_segment(c.get("name"))
                   version = clean_version(c.get("version") or ver_p)
-                  git_url = best_git_url_from_cdx(c, purl) or git_p
-                  git_url = normalize_git_url(git_url)
+                  git_url = normalize_git_url(best_git_url_from_cdx(c, purl) or git_p)
+                  license_sbom = pick_spdx_license_from_cdx(c)
                   if name:
-                      out.append({"component": name, "version": version, "git_url": git_url})
+                      out.append({"component": name, "version": version, "git_url": git_url, "license": license_sbom})
               return out
 
           def parse_spdx(path):
@@ -164,6 +183,7 @@ jobs:
               for p in pkgs:
                   name = last_segment(p.get("name") or p.get("packageName"))
                   version = clean_version(p.get("versionInfo"))
+                  # purl from externalRefs
                   purl = None
                   for ref in p.get("externalRefs", []) or []:
                       rtype = (ref.get("referenceType") or ref.get("type") or "").lower()
@@ -174,25 +194,29 @@ jobs:
                   name_p, ver_p, git_p = extract_from_purl(purl) if purl else (None, None, None)
                   if name_p: name = name_p
                   if not version: version = clean_version(ver_p)
-                  git_url = best_git_url_from_spdx(p) or git_p
-                  git_url = normalize_git_url(git_url)
+                  git_url = normalize_git_url(best_git_url_from_spdx(p) or git_p)
+                  license_sbom = pick_spdx_license_from_spdx(p)
                   if name:
-                      out.append({"component": name, "version": version, "git_url": git_url})
+                      out.append({"component": name, "version": version, "git_url": git_url, "license": license_sbom})
               return out
 
-          # Merge by (component, version), prefer entries with valid git_url
+          # Parse, merge by (component, version). Prefer entries that have license/git_url.
           comps = parse_cyclonedx(CDX_PATH) + parse_spdx(SPDX_PATH)
-          seen, result = set(), []
+          merged = {}
           for c in comps:
               key = (c["component"], c.get("version") or "")
-              if key in seen:
-                  if c.get("git_url"):
-                      for r in result:
-                          if (r["component"], r.get("version") or "") == key and not r.get("git_url"):
-                              r["git_url"] = c["git_url"]
-                  continue
-              seen.add(key)
-              result.append(c)
+              prev = merged.get(key)
+              if not prev:
+                  merged[key] = c
+              else:
+                  # prefer license present
+                  if not prev.get("license") and c.get("license"):
+                      prev["license"] = c["license"]
+                  # prefer git_url present
+                  if not prev.get("git_url") and c.get("git_url"):
+                      prev["git_url"] = c["git_url"]
+
+          result = list(merged.values())
 
           os.makedirs("artifacts", exist_ok=True)
           with open("artifacts/components.json", "w", encoding="utf-8") as f:
@@ -206,6 +230,7 @@ jobs:
           name: components-json
           path: artifacts/components.json
 
+      # ========= Install ScanCode (PyPI) =========
       - name: Create venv & install ScanCode (PyPI, pinned 32.4.1)
         id: install_scancode
         run: |
@@ -217,7 +242,8 @@ jobs:
           .venv/bin/scancode --version
           echo "SCANCODE=.venv/bin/scancode" >> "$GITHUB_ENV"
 
-      - name: Clone repos and run ScanCode (copyright + license) with per-component summary
+      # ========= Clone & Scan (copyright + license for detection, but we do NOT use license for attribution) =========
+      - name: Clone repos and run ScanCode (copyright + license)
         env:
           SCANCODE: ${{ env.SCANCODE }}
         run: |
@@ -226,8 +252,6 @@ jobs:
           import json, os, subprocess, shlex, re
 
           SCANCODE = os.environ["SCANCODE"]
-          SUMMARY_PATH = os.environ.get("GITHUB_STEP_SUMMARY")
-
           with open("artifacts/components.json", "r", encoding="utf-8") as f:
               comps = json.load(f).get("components", [])
 
@@ -239,33 +263,16 @@ jobs:
               print("+", cmd)
               return subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
-          md = []
-          md.append("## Component-wise Scan Summary")
-          md.append("")
-          md.append("| Component | Version | Repo URL | Checkout | Status | Files | Errors | #Copyrights | Licenses |")
-          md.append("|---|---|---|---|---|---:|---:|---:|---|")
-
-          results = []
           for item in comps:
               name = item.get("component")
               version = item.get("version")  # None => default branch
               git_url = item.get("git_url")
 
-              if not name:
-                  continue
-
-              checkout_desc = "default branch" if not version else f"tag/branch `{version}`"
-              status = "skipped"
-              files_count = 0
-              errors_count = 0
-              copy_count = 0
-              license_keys_preview = "-"
-
-              if not git_url:
-                  results.append({"component": name, "version": version, "git_url": git_url,
-                                  "copyrights": {"unique_statements": [], "per_file": []},
-                                  "licenses": {"unique_keys": [], "per_file": []}})
-                  md.append(f"| `{name}` | {version or ''} | *(none)* | {checkout_desc} | skipped | 0 | 0 | 0 | - |")
+              if not name or not git_url:
+                  # Skip if no repo URL
+                  out_json = os.path.join("scancode_results", sanitize(name) + ".json")
+                  with open(out_json, "w", encoding="utf-8") as f:
+                      json.dump({"files": []}, f)
                   continue
 
               dest = os.path.join("repos", sanitize(name) + (f"-{sanitize(version)}" if version else ""))
@@ -274,21 +281,18 @@ jobs:
                       p = run(f"git clone --depth 1 --branch {shlex.quote(version)} {shlex.quote(git_url)} {shlex.quote(dest)}")
                       if p.returncode != 0:
                           print(p.stdout)
-                          status = "clone failed"
-                          results.append({"component": name, "version": version, "git_url": git_url,
-                                          "copyrights": {"unique_statements": [], "per_file": []},
-                                          "licenses": {"unique_keys": [], "per_file": []}})
-                          md.append(f"| `{name}` | {version or ''} | {git_url} | {checkout_desc} | {status} | 0 | 0 | 0 | - |")
+                          # still create an empty scan result to keep pipeline consistent
+                          out_json = os.path.join("scancode_results", sanitize(name) + ".json")
+                          with open(out_json, "w", encoding="utf-8") as f:
+                              json.dump({"files": []}, f)
                           continue
                   else:
                       p = run(f"git clone --depth 1 {shlex.quote(git_url)} {shlex.quote(dest)}")
                       if p.returncode != 0:
                           print(p.stdout)
-                          status = "clone failed"
-                          results.append({"component": name, "version": version, "git_url": git_url,
-                                          "copyrights": {"unique_statements": [], "per_file": []},
-                                          "licenses": {"unique_keys": [], "per_file": []}})
-                          md.append(f"| `{name}` | {version or ''} | {git_url} | {checkout_desc} | {status} | 0 | 0 | 0 | - |")
+                          out_json = os.path.join("scancode_results", sanitize(name) + ".json")
+                          with open(out_json, "w", encoding="utf-8") as f:
+                              json.dump({"files": []}, f)
                           continue
 
               out_json = os.path.join("scancode_results", sanitize(name) + ".json")
@@ -296,117 +300,6 @@ jobs:
               p = run(cmd)
               if p.returncode != 0:
                   print(p.stdout)
-
-              unique_copyrights = set()
-              per_file_copyrights = []
-              unique_license_keys = set()
-              per_file_licenses = []
-
-              try:
-                  with open(out_json, "r", encoding="utf-8") as f:
-                      data = json.load(f)
-
-                  headers = data.get("headers", [])
-                  if headers:
-                      h0 = headers[0]
-                      files_count = h0.get("files_count") or h0.get("resource_count") or 0
-                      errors_count = len(h0.get("errors", []) or [])
-                  if not files_count:
-                      files_count = len(data.get("files", []) or [])
-
-                  for fe in data.get("files", []) or []:
-                      path = fe.get("path") or fe.get("location") or ""
-
-                      # Copyrights (statements + holders)
-                      file_statements = []
-                      holders = []
-                      for c in fe.get("copyrights", []) or []:
-                          for stmt in c.get("statements", []) or []:
-                              s = (stmt or "").strip()
-                              if s:
-                                  file_statements.append(s)
-                                  unique_copyrights.add(s)
-                          for h in c.get("holders", []) or []:
-                              h = (h or "").strip()
-                              if h:
-                                  holders.append(h)
-                      if file_statements or holders:
-                          per_file_copyrights.append({
-                              "path": path,
-                              "statements": file_statements,
-                              "holders": holders
-                          })
-
-                      # Licenses: legacy "licenses", expressions, and v32 detections
-                      for lic in fe.get("licenses", []) or []:
-                          key = lic.get("key")
-                          if key:
-                              unique_license_keys.add(key)
-
-                      expr = fe.get("detected_license_expression") or fe.get("license_expression") or ""
-                      if expr:
-                          for token in re.split(r'\s+(AND|OR|WITH)\s+', expr):
-                              token = token.strip()
-                              if token and token not in {"AND","OR","WITH"}:
-                                  unique_license_keys.add(token)
-
-                      for det in fe.get("license_detections", []) or []:
-                          k = det.get("license_expression") or det.get("license_expression_spdx") or ""
-                          if k:
-                              for token in re.split(r'\s+(AND|OR|WITH)\s+', k):
-                                  token = token.strip()
-                                  if token and token not in {"AND","OR","WITH"}:
-                                      unique_license_keys.add(token)
-                          per_file_licenses.append({
-                              "path": path,
-                              "detected_expression": det.get("license_expression") or det.get("license_expression_spdx"),
-                              "matches": det.get("matches", [])
-                          })
-
-                  # codebase-level unique license detections (if present)
-                  for det in data.get("license_detections", []) or []:
-                      k = det.get("license_expression") or det.get("license_expression_spdx") or ""
-                      if k:
-                          for token in re.split(r'\s+(AND|OR|WITH)\s+', k):
-                              token = token.strip()
-                              if token and token not in {"AND","OR","WITH"}:
-                                  unique_license_keys.add(token)
-
-              except Exception as e:
-                  print(f"Parse failed for {name}: {e}")
-
-              copy_count = len(unique_copyrights)
-              status = "scanned"
-              license_keys_preview = "-"
-              if unique_license_keys:
-                  preview = sorted(unique_license_keys)[:3]
-                  license_keys_preview = ", ".join(preview) + ("…" if len(unique_license_keys) > 3 else "")
-
-              results.append({
-                  "component": name,
-                  "version": version,
-                  "git_url": git_url,
-                  "copyrights": {
-                      "unique_statements": sorted(unique_copyrights),
-                      "per_file": per_file_copyrights
-                  },
-                  "licenses": {
-                      "unique_keys": sorted(unique_license_keys),
-                      "per_file": per_file_licenses
-                  }
-              })
-
-              md.append(f"| `{name}` | {version or ''} | {git_url} | {checkout_desc} | {status} | {files_count} | {errors_count} | {copy_count} | {license_keys_preview or '-'} |")
-
-          os.makedirs("artifacts", exist_ok=True)
-          with open("artifacts/component_copyrights.json", "w", encoding="utf-8") as f:
-              json.dump({"components": results}, f, indent=2, ensure_ascii=False)
-
-          if SUMMARY_PATH:
-              with open(SUMMARY_PATH, "a", encoding="utf-8") as sf:
-                  sf.write("\n".join(md) + "\n")
-
-          print(f"Wrote artifacts/component_copyrights.json for {len(results)} components.")
           PY
 
       - name: Upload raw ScanCode outputs (per-repo)
@@ -417,122 +310,134 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: Upload final aggregated copyrights + licenses (JSON)
+      # ========= Aggregate copyrights (we will NOT use ScanCode license downstream) =========
+      - name: Aggregate copyrights (JSON)
+        run: |
+          set -euo pipefail
+          python - << 'PY'
+          import json, os, re
+
+          with open("artifacts/components.json", "r", encoding="utf-8") as f:
+              comps = json.load(f).get("components", [])
+
+          def sanitize(s): return re.sub(r'[^A-Za-z0-9_.-]+', '-', (s or "")).strip('-') or "unknown"
+
+          def load_raw(component_name):
+              p = os.path.join("scancode_results", sanitize(component_name) + ".json")
+              if os.path.exists(p):
+                  with open(p, "r", encoding="utf-8") as f:
+                      return json.load(f)
+              return {"files": []}
+
+          results = []
+          for item in comps:
+              name = item.get("component")
+              version = item.get("version")
+              git_url = item.get("git_url")
+              sbom_license = item.get("license")  # from SBOMs (SPDX/CycloneDX)
+
+              data = load_raw(name)
+
+              unique_copyrights = set()
+              per_file_copyrights = []
+
+              for fe in data.get("files", []) or []:
+                  path = fe.get("path") or fe.get("location") or ""
+                  file_statements = []
+                  holders = []
+                  for c in fe.get("copyrights", []) or []:
+                      for stmt in c.get("statements", []) or []:
+                          s = (stmt or "").strip()
+                          if s:
+                              file_statements.append(s)
+                              unique_copyrights.add(s)
+                      for h in c.get("holders", []) or []:
+                          h = (h or "").strip()
+                          if h:
+                              holders.append(h)
+                  if file_statements or holders:
+                      per_file_copyrights.append({
+                          "path": path,
+                          "statements": file_statements,
+                          "holders": holders
+                      })
+
+              results.append({
+                  "component": name,
+                  "version": version,
+                  "git_url": git_url,
+                  "license": sbom_license,  # keep SBOM license here too
+                  "copyrights": {
+                      "unique_statements": sorted(unique_copyrights),
+                      "per_file": per_file_copyrights
+                  }
+              })
+
+          os.makedirs("artifacts", exist_ok=True)
+          with open("artifacts/component_copyrights.json", "w", encoding="utf-8") as f:
+              json.dump({"components": results}, f, indent=2, ensure_ascii=False)
+          print(f"Wrote artifacts/component_copyrights.json for {len(results)} components.")
+          PY
+
+      - name: Upload aggregated copyrights (JSON)
         uses: actions/upload-artifact@v4
         with:
-          name: component-copyrights-licenses
+          name: component-copyrights
           path: artifacts/component_copyrights.json
           if-no-files-found: error
           retention-days: 30
 
-      - name: Build per-component attribution file (YAML)
+      # ========= Build Attribution (YAML) using SBOM license only =========
+      - name: Build per-component attribution (YAML from SBOM license, copyrights from ScanCode)
         run: |
           set -euo pipefail
           python - << 'PY'
-          import json, os, re, sys
+          import json, os, re
 
-          def sanitize(s):
-              import re
-              return re.sub(r'[^A-Za-z0-9_.-]+', '-', (s or "")).strip('-') or "unknown"
+          # Load components with SBOM licenses
+          with open("artifacts/components.json", "r", encoding="utf-8") as f:
+              components = json.load(f).get("components", [])
 
-          def esc_yaml(s):
-              if s is None: 
-                  return '""'
+          # Load aggregated copyrights (built from raw ScanCode)
+          with open("artifacts/component_copyrights.json", "r", encoding="utf-8") as f:
+              agg = json.load(f).get("components", [])
+
+          by_name = {c.get("component"): c for c in agg}
+
+          def esc(s):
+              if s is None: return '""'
               if re.search(r'[:#\\-\\[\\]\\{\\},&*?]|^\\s|\\s$', s):
                   return '"' + s.replace('"', '\\"') + '"'
               return s
 
-          def write_yaml(items, path):
-              lines = []
-              lines.append("components:")
-              for it in items:
-                  lines.append("  - component: " + esc_yaml(it["component"]))
-                  if it.get("version") is not None:
-                      lines.append("    version: " + esc_yaml(it["version"]))
-                  lines.append("    url: " + esc_yaml(it.get("url") or ""))
-                  lines.append("    license: " + esc_yaml(it.get("license") or ""))
-                  cps = it.get("copyrights") or []
-                  if cps:
-                      lines.append("    copyrights:")
-                      for c in cps:
-                          lines.append("      - " + esc_yaml(c))
-                  else:
-                      lines.append("    copyrights: []")
-              with open(path, "w", encoding="utf-8") as f:
-                  f.write("\\n".join(lines) + "\\n")
-
-          try:
-              with open("artifacts/components.json", "r", encoding="utf-8") as f:
-                  components = json.load(f).get("components", [])
-          except Exception as e:
-              print(f"FATAL: cannot read artifacts/components.json: {e}")
-              sys.exit(1)
-
-          # Build YAML from RAW only (to keep in sync with TXT behavior)
-          def load_raw(component_name):
-              p = os.path.join("scancode_results", sanitize(component_name) + ".json")
-              if os.path.exists(p):
-                  try:
-                      with open(p, "r", encoding="utf-8") as f:
-                          return json.load(f)
-                  except Exception as e:
-                      print(f"WARNING: failed to parse raw JSON for {component_name}: {e}")
-              else:
-                  print(f"INFO: raw JSON not found for {component_name}: {p}")
-              return None
-
-          def top_spdx_from_raw(data):
-              if not data: return None
-              counts = {}
-              def bump(key):
-                  if not key: return
-                  k = key.strip()
-                  if not k: return
-                  if k.startswith("(") and k.endswith(")"):
-                      k = k[1:-1].strip()
-                  counts[k] = counts.get(k, 0) + 1
-              for fe in data.get("files", []) or []:
-                  bump(fe.get("detected_license_expression_spdx"))
-                  for det in fe.get("license_detections", []) or []:
-                      bump(det.get("license_expression_spdx"))
-                  for lic in fe.get("licenses", []) or []:
-                      bump(lic.get("spdx_license_key"))
-              for det in data.get("license_detections", []) or []:
-                  bump(det.get("license_expression_spdx"))
-              if not counts: return None
-              return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
-
-          def copyrights_from_raw(data):
-              if not data: return []
-              out = set()
-              for fe in data.get("files", []) or []:
-                  for c in fe.get("copyrights", []) or []:
-                      v = (c.get("copyright") or "").strip()
-                      if v: out.add(v)
-              return sorted(out)
-
-          entries = []
+          lines = []
+          lines.append("components:")
           for comp in components:
               name = comp.get("component")
               version = comp.get("version")
               url = comp.get("git_url")
+              sbom_license = comp.get("license")
 
-              raw = load_raw(name)
-              primary_spdx = top_spdx_from_raw(raw)
-              copyrights = copyrights_from_raw(raw)
+              lines.append("  - component: " + esc(name))
+              if version is not None:
+                  lines.append("    version: " + esc(version))
+              lines.append("    url: " + esc(url or ""))
+              lines.append("    license: " + esc(sbom_license or ""))
 
-              entries.append({
-                  "component": name,
-                  "version": version,
-                  "url": url,
-                  "license": primary_spdx,
-                  "copyrights": copyrights,
-              })
+              agg_entry = by_name.get(name, {})
+              cps = agg_entry.get("copyrights", {}).get("unique_statements", []) or []
+              if cps:
+                  lines.append("    copyrights:")
+                  for c in cps:
+                      lines.append("      - " + esc(c))
+              else:
+                  lines.append("    copyrights: []")
 
           os.makedirs("artifacts", exist_ok=True)
           out_yaml = "artifacts/component_attribution.yaml"
-          write_yaml(entries, out_yaml)
-          print(f"Wrote {out_yaml} with {len(entries)} components.")
+          with open(out_yaml, "w", encoding="utf-8") as f:
+              f.write("\n".join(lines) + "\n")
+          print(f"Wrote {out_yaml} with {len(components)} components.")
           PY
 
       - name: Upload per-component attribution (YAML)
@@ -543,13 +448,13 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Build per-component attribution file (TXT, line-by-line) — RAW ONLY
+      # ========= Build Attribution (TXT) using SBOM license only =========
+      - name: Build per-component attribution (TXT from SBOM license, copyrights from ScanCode)
         run: |
           set -euo pipefail
           python - << 'PY'
-          import json, os, sys, re
+          import json, os, re, sys
 
-          # Use components list to know which raw files to read
           try:
               with open("artifacts/components.json", "r", encoding="utf-8") as f:
                   components = json.load(f).get("components", [])
@@ -557,69 +462,30 @@ jobs:
               print(f"FATAL: cannot read artifacts/components.json: {e}")
               sys.exit(1)
 
-          def sanitize(s):
-              return re.sub(r'[^A-Za-z0-9_.-]+', '-', (s or "")).strip('-') or "unknown"
+          try:
+              with open("artifacts/component_copyrights.json", "r", encoding="utf-8") as f:
+                  agg = json.load(f).get("components", [])
+          except Exception as e:
+              print(f"FATAL: cannot read aggregated copyrights: {e}")
+              sys.exit(1)
 
-          def load_raw(component_name):
-              p = os.path.join("scancode_results", sanitize(component_name) + ".json")
-              if os.path.exists(p):
-                  try:
-                      with open(p, "r", encoding="utf-8") as f:
-                          return json.load(f)
-                  except Exception as e:
-                      print(f"WARNING: failed to parse raw JSON for {component_name}: {e}")
-              else:
-                  print(f"INFO: raw JSON not found for {component_name}: {p}")
-              return None
-
-          def top_spdx_from_raw(data):
-              if not data: return None
-              counts = {}
-              def bump(key):
-                  if not key: return
-                  k = key.strip()
-                  if not k: return
-                  if k.startswith("(") and k.endswith(")"):
-                      k = k[1:-1].strip()
-                  counts[k] = counts.get(k, 0) + 1
-              for fe in data.get("files", []) or []:
-                  bump(fe.get("detected_license_expression_spdx"))
-                  for det in fe.get("license_detections", []) or []:
-                      bump(det.get("license_expression_spdx"))
-                  for lic in fe.get("licenses", []) or []:
-                      bump(lic.get("spdx_license_key"))
-              for det in data.get("license_detections", []) or []:
-                  bump(det.get("license_expression_spdx"))
-              if not counts: return None
-              return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
-
-          def copyrights_from_raw(data):
-              if not data: return []
-              out = set()
-              for fe in data.get("files", []) or []:
-                  for c in fe.get("copyrights", []) or []:
-                      v = (c.get("copyright") or "").strip()
-                      if v: out.add(v)
-              return sorted(out)
+          by_name = {c.get("component"): c for c in agg}
 
           lines = []
           for comp in components:
               name = comp.get("component") or ""
               version = comp.get("version")
               url = comp.get("git_url") or ""
-
-              raw = load_raw(name)
-
-              spdx = top_spdx_from_raw(raw) or ""
-              cps = copyrights_from_raw(raw)
+              sbom_license = comp.get("license") or ""  # SBOM license only
 
               lines.append(f"Component: {name}")
               if version:
                   lines.append(f"Version: {version}")
               lines.append(f"URL: {url}")
-              lines.append(f"License: {spdx}")
+              lines.append(f"License: {sbom_license}")
 
               lines.append("Copyrights:")
+              cps = (by_name.get(name, {}) or {}).get("copyrights", {}).get("unique_statements", []) or []
               if cps:
                   for stmt in cps:
                       stmt = stmt.replace("<", "&lt;").replace(">", "&gt;")
