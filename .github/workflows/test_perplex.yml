@@ -1,0 +1,46 @@
+name: Generate NOTICE Files
+
+on:
+  push:
+    paths:
+      - 'sboms/**.json'
+      - '.github/workflows/generate-notice.yml'
+      - 'generate_notice.py'
+      - 'scancode_runner.py'
+  workflow_dispatch:
+
+jobs:
+  generate_notice:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install spdx-tools cyclonedx-python-lib requests
+
+      - name: Generate Initial NOTICE.md
+        run: python generate_notice.py
+
+      - name: Setup ScanCode Toolkit
+        run: |
+          wget -qO- https://github.com/nexB/scancode-toolkit/releases/download/v32.2.0/scancode-toolkit-32.2.0.zip > scancode.zip
+          unzip scancode.zip -d scancode-toolkit
+
+      - name: Run ScanCode scans in parallel
+        run: |
+          python scancode_runner.py
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: notice-artifacts
+          path: |
+            NOTICE.md
+            NOTICE-with-scancode.md
