@@ -1,6 +1,5 @@
 import json
 import argparse
-import re
 
 def norm(s):
     if s is None:
@@ -12,7 +11,7 @@ def norm(s):
 
 def detect_sbom_type(doc):
     if isinstance(doc, dict):
-        if doc.get("bomFormat") == "CycloneDX":
+        if doc.get("bomFormat") == "CycloneDX" or "components" in doc:
             return "cdx"
         if "spdxVersion" in doc or "SPDXID" in doc or "packages" in doc:
             return "spdx"
@@ -21,42 +20,28 @@ def detect_sbom_type(doc):
 def extract_from_spdx(doc):
     components = []
     for p in doc.get("packages", []):
-        purl = None
-        for ext_ref in p.get("externalRefs", []):
-            if "purl" in (ext_ref.get("referenceType") or "").lower():
-                purl = ext_ref.get("referenceLocator")
-                break
-        purl = norm(purl)
-        name = None
-        if purl:
-            name = purl.split("/")[-1]
-        else:
-            name = norm(p.get("name"))
+        url = norm(p.get("downloadLocation")) or norm(p.get("homepage")) or ""
+        name = url.split("/")[-1] if url else norm(p.get("name"))
         version = norm(p.get("versionInfo")) or "latest"
         if not name:
             continue
-        components.append({"component": name, "version": version, "purl": purl or "", "url": norm(p.get("downloadLocation")) or norm(p.get("homepage")) or ""})
+        components.append({"component": name, "version": version, "url": url})
     return components
 
 def extract_from_cdx(doc):
     components = []
     for c in doc.get("components", []):
-        purl = norm(c.get("purl"))
-        name = None
-        if purl:
-            name = purl.split("/")[-1]
-        else:
-            name = norm(c.get("name"))
+        url = ""
+        for extref in c.get("externalReferences", []):
+            candidate = norm(extref.get("url"))
+            if candidate:
+                url = candidate
+                break
+        name = url.split("/")[-1] if url else norm(c.get("name"))
         version = norm(c.get("version")) or "latest"
         if not name:
             continue
-        url = ""
-        for extref in c.get("externalReferences", []):
-            url_candidate = norm(extref.get("url"))
-            if url_candidate:
-                url = url_candidate
-                break
-        components.append({"component": name, "version": version, "purl": purl or "", "url": url})
+        components.append({"component": name, "version": version, "url": url})
     return components
 
 def main():
@@ -77,7 +62,7 @@ def main():
     if detect_sbom_type(cdx_doc) == "cdx":
         components.extend(extract_from_cdx(cdx_doc))
 
-    # Remove duplicates by component + version
+    # Deduplicate by name@version
     seen = set()
     unique_components = []
     for c in components:
@@ -86,18 +71,9 @@ def main():
             seen.add(key)
             unique_components.append(c)
 
-    # Prepare matrix JSON
-    matrix = {"include": []}
-    for comp in unique_components:
-        matrix["include"].append({
-            "component": comp["component"],
-            "version": comp["version"],
-            "purl": comp["purl"],
-            "url": comp["url"]
-        })
-
+    # Write plain array for matrix
     with open("matrix.json", "w", encoding="utf-8") as f:
-        json.dump(matrix, f, indent=2)
+        json.dump(unique_components, f, indent=2)
 
 if __name__ == "__main__":
     main()
