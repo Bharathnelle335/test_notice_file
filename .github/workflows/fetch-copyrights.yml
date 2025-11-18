@@ -24,21 +24,20 @@ jobs:
           test -f "sboms/spdx-lite.json" || { echo "Missing sboms/spdx-lite.json" >&2; exit 1; }
           test -f "sboms/cyclonedx.json" || { echo "Missing sboms/cyclonedx.json" >&2; exit 1; }
 
-      - name: Set up Python
+      - name: Set up Python (3.11 for ScanCode 32.4.x)
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install prerequisites for ScanCode configure
+      # NOTE: no python3-distutils on Ubuntu 24.04. Keep deps minimal.
+      - name: Install minimal prerequisites
         run: |
           set -euo pipefail
           sudo apt-get update
-          # essentials needed by configure and bundled wheels
-          sudo apt-get install -y \
-            python3-venv python3-distutils \
-            xz-utils bzip2 zlib1g libxml2-dev libxslt1-dev
+          sudo apt-get install -y xz-utils bzip2 zlib1g libxml2-dev libxslt1-dev git-lfs
+          git lfs install
 
-      - name: Generate components.json from SBOMs (robust git_url; omit unknown version)
+      - name: Generate components.json from SBOMs (robust git_url; treat unknown version as null)
         run: |
           set -euo pipefail
           python - << 'PY'
@@ -182,6 +181,7 @@ jobs:
                       out.append({"component": name, "version": version, "git_url": git_url})
               return out
 
+          # Merge by (component, version), prefer entries with valid git_url
           comps = parse_cyclonedx(CDX_PATH) + parse_spdx(SPDX_PATH)
           seen, result = set(), []
           for c in comps:
@@ -207,39 +207,22 @@ jobs:
           name: components-json
           path: artifacts/components.json
 
-      - name: Install ScanCode Toolkit (hardcoded v32.4.1 for Python 3.11, Linux) + configure venv
+      - name: Create venv & install ScanCode (PyPI, pinned 32.4.1)
         id: install_scancode
         run: |
           set -euo pipefail
-          mkdir -p scancode && cd scancode
-          ASSET_URL="https://github.com/aboutcode-org/scancode-toolkit/releases/download/v32.4.1/scancode-toolkit-v32.4.1_py3.11-linux.tar.gz"
-          echo "Downloading: $ASSET_URL"
-          curl -fsSL "$ASSET_URL" -o scancode.tar.gz
-          tar -xzf scancode.tar.gz
-          SCANCODE_DIR=$(ls -d scancode-toolkit-* | head -n 1)
-          if [ -z "${SCANCODE_DIR:-}" ]; then
-            echo "Extraction failed: scancode-toolkit-* directory not found." >&2
-            exit 1
-          fi
-
-          # Use the same Python set up by actions/setup-python
-          PYBIN="$(python -c 'import sys; print(sys.executable)')"
-          echo "Configuring ScanCode with Python at: $PYBIN"
-          (cd "$SCANCODE_DIR" && ./configure --python "$PYBIN")
-
-          # Verify venv scancode exists
-          if [ ! -x "$SCANCODE_DIR/venv/bin/scancode" ]; then
-            echo "ScanCode venv/bin/scancode not found after configure." >&2
-            exit 1
-          fi
-
-          echo "SCANCODE_VENV=$PWD/$SCANCODE_DIR/venv/bin/scancode" >> "$GITHUB_ENV"
-          echo "SCANCODE_DIR=$PWD/$SCANCODE_DIR" >> "$GITHUB_ENV"
-          echo "Installed & configured ScanCode at $SCANCODE_DIR"
+          python -m venv .venv
+          . .venv/bin/activate
+          python -m pip install --upgrade pip
+          # Install ScanCode CLI
+          pip install "scancode-toolkit==32.4.1"
+          # sanity check
+          .venv/bin/scancode --version
+          echo "SCANCODE=.venv/bin/scancode" >> "$GITHUB_ENV"
 
       - name: Clone repos and run ScanCode (copyright + license) with per-component summary
         env:
-          SCANCODE: ${{ env.SCANCODE_VENV }}
+          SCANCODE: ${{ env.SCANCODE }}
         run: |
           set -euo pipefail
           python - << 'PY'
@@ -326,7 +309,6 @@ jobs:
                   with open(out_json, "r", encoding="utf-8") as f:
                       data = json.load(f)
 
-                  # Some archives put counts in headers; otherwise count files array
                   headers = data.get("headers", [])
                   if headers:
                       h0 = headers[0]
