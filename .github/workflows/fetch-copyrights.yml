@@ -2,11 +2,6 @@ name: Extract components & fetch copyrights
 
 on:
   workflow_dispatch:
-    inputs:
-      scancode_version:
-        description: "ScanCode release tag (e.g., v32.0.0). Leave blank to use default stable."
-        required: false
-        default: ""
   push:
     branches: [ main, master ]
   pull_request:
@@ -142,34 +137,13 @@ jobs:
           name: components-json
           path: artifacts/components.json
 
-      - name: Install ScanCode Toolkit (pinned stable, no jq)
-        id: install_scancode
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SCANCODE_VERSION: ${{ inputs.scancode_version }}
+      - name: Install ScanCode Toolkit (hardcoded v32.0.0)
         run: |
           set -euo pipefail
-          VERSION="${SCANCODE_VERSION:-}"
-          # Default to a known stable if not provided
-          if [ -z "$VERSION" ]; then VERSION="v32.0.0"; fi
-          echo "Using ScanCode version: $VERSION"
-
           mkdir -p scancode && cd scancode
-          # Fetch the specific release by tag
-          REL_JSON=$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" \
-                               -H "Accept: application/vnd.github+json" \
-                               "https://api.github.com/repos/nexB/scancode-toolkit/releases/tags/${VERSION}" || true)
 
-          # Extract first linux x86_64 tarball URL without jq
-          ASSET_URL=$(echo "$REL_JSON" | grep -o '"browser_download_url": *"[^"]*"' \
-            | grep -E 'linux(_|-)?x86_64.*\.tar\.xz|linux_64.*\.tar\.xz' \
-            | head -n 1 | sed 's/"browser_download_url": *"//;s/"$//')
-
-          if [ -z "${ASSET_URL:-}" ]; then
-            echo "Could not find asset for tag ${VERSION}. Ensure the tag exists and has a Linux x86_64 tarball." >&2
-            exit 1
-          fi
-
+          # Hardcoded stable release tarball for Linux x86_64
+          ASSET_URL="https://github.com/nexB/scancode-toolkit/releases/download/v32.0.0/scancode-toolkit-32.0.0.linux-x86_64.tar.xz"
           echo "Downloading: $ASSET_URL"
           curl -fsSL "$ASSET_URL" -o scancode.tar.xz
           tar -xf scancode.tar.xz
@@ -282,3 +256,4 @@ jobs:
           name: component-copyrights
           path: artifacts/component_copyrights.json
           if-no-files-found: error
+          retention-days: 30
