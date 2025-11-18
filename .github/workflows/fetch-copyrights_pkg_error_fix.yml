@@ -1,4 +1,4 @@
-name: Extract components & fetch copyrights + licenses
+name: Extract components & fetch copyrights testing urls
 on:
   workflow_dispatch:
   push:
@@ -116,24 +116,72 @@ jobs:
                   if spdx_id: return spdx_id
               return None
 
-          # ---------- URL resolvers (ignore purl) ----------
+          # ---------- NEW: narrow fallback for pkg-like locators in externalRefs ----------
+          def _git_url_from_pkgish_locator(locator: str|None) -> str|None:
+              """
+              Use ONLY as a last fallback when no real repo URL was found.
+              Accept shapes embedded in purl-like locators:
+                - pkg:golang/github.com/<owner>/<repo>[@version][...]
+                - pkg:github/<owner>/<repo>[...]
+                - pkg:github.com/<owner>/<repo>[...]
+                - (similarly for gitlab.com, bitbucket.org)
+              Returns normalized https://host/owner/repo.git or None.
+              """
+              if not locator: return None
+              s = locator.strip()
+              if not s.startswith("pkg:"): 
+                  return None  # handle only pkg:-prefixed locators
+
+              body = s[4:]  # drop 'pkg:'
+              body = body.split('#', 1)[0]
+              body = body.split('?', 1)[0]
+              if '@' in body:
+                  body, _ = body.rsplit('@', 1)
+
+              parts = body.strip("/").split("/")
+              if len(parts) < 3:
+                  return None
+
+              host, owner, repo = None, None, None
+
+              # golang/github.com/owner/repo
+              if parts[0] == "golang" and parts[1] in HOSTS and len(parts) >= 4:
+                  host, owner, repo = parts[1], parts[2], parts[3]
+              # github/owner/repo (short form)
+              elif parts[0] == "github" and len(parts) >= 3:
+                  host, owner, repo = "github.com", parts[1], parts[2]
+              # host/owner/repo (github.com, gitlab.com, bitbucket.org)
+              elif parts[0] in HOSTS and len(parts) >= 3:
+                  host, owner, repo = parts[0], parts[1], parts[2]
+
+              if host and owner and repo:
+                  repo = repo.rstrip(".git")
+                  return f"https://{host}/{owner}/{repo}.git"
+
+              return None
+
+          # ---------- URL resolvers (ignore purl; add pkg-locator last resort) ----------
           def best_git_url_from_spdx(pkg) -> str|None:
               """
               Only use real URLs present in SPDX:
-              1) downloadLocation
-              2) homepage
-              3) externalRefs of type vcs/repository/scm (or any known git host URL)
+                1) downloadLocation
+                2) homepage
+                3) externalRefs of type vcs/repository/scm (or any known-host URL)
+                4) LAST RESORT: externalRefs[*].referenceLocator starting with 'pkg:' that embeds a known host path
               """
               if not pkg: return None
 
+              # 1) downloadLocation
               dl = pkg.get("downloadLocation") or ""
               u = normalize_git_url(dl)
               if u: return u
 
+              # 2) homepage
               hp = pkg.get("homepage") or ""
               u = normalize_git_url(hp)
               if u: return u
 
+              # 3) externalRefs VCS / known-host URLs
               for ref in pkg.get("externalRefs", []) or []:
                   rtype = (ref.get("referenceType") or ref.get("type") or "").lower()
                   loc = ref.get("referenceLocator") or ref.get("locator") or ""
@@ -141,15 +189,24 @@ jobs:
                       u = normalize_git_url(loc)
                       if u: return u
 
+              # 4) LAST RESORT: pkg-like locator that embeds a known host path
+              for ref in pkg.get("externalRefs", []) or []:
+                  loc = ref.get("referenceLocator") or ref.get("locator") or ""
+                  if isinstance(loc, str) and loc.startswith("pkg:"):
+                      u = _git_url_from_pkgish_locator(loc)
+                      if u: return u
+
               return None
 
           def best_git_url_from_cdx(comp, purl) -> str|None:
               """
-              Only use real URLs present in CycloneDX:
-              - externalReferences of type vcs/repository/scm/source
-              - component.repository
+              CycloneDX priority:
+                - externalReferences of type vcs/repository/scm/source (or known-host URLs)
+                - component.repository
+                - LAST RESORT: externalReferences[*].locator starting with 'pkg:' that embeds a known host path
               """
               if comp:
+                  # 1) VCS-like external refs / known-host URLs
                   for ref in comp.get("externalReferences", []) or []:
                       rtype = (ref.get("type") or "").lower()
                       url = ref.get("url") or ref.get("locator") or ""
@@ -157,9 +214,17 @@ jobs:
                           u = normalize_git_url(url)
                           if u: return u
 
+                  # 2) component.repository
                   url = comp.get("repository") or ""
                   u = normalize_git_url(url)
                   if u: return u
+
+                  # 3) LAST RESORT: pkg-like locator in externalReferences
+                  for ref in comp.get("externalReferences", []) or []:
+                      loc = ref.get("url") or ref.get("locator") or ""
+                      if isinstance(loc, str) and loc.startswith("pkg:"):
+                          u = _git_url_from_pkgish_locator(loc)
+                          if u: return u
 
               return None
 
@@ -173,7 +238,7 @@ jobs:
                   name_p, ver_p, _ = extract_from_purl(purl) if purl else (None, None, None)
                   name = name_p or last_segment(c.get("name"))
                   version = clean_version(c.get("version") or ver_p)
-                  git_url = normalize_git_url(best_git_url_from_cdx(c, purl))  # no purl fallback
+                  git_url = normalize_git_url(best_git_url_from_cdx(c, purl))  # no generic purl fallback
                   license_sbom = pick_spdx_license_from_cdx(c)
                   if name:
                       out.append({"component": name, "version": version, "git_url": git_url, "license": license_sbom})
@@ -187,7 +252,7 @@ jobs:
               for p in pkgs:
                   name = last_segment(p.get("name") or p.get("packageName"))
                   version = clean_version(p.get("versionInfo"))
-                  # capture purl only for name/version convenience
+                  # capture purl only for name/version convenience (NOT for URL)
                   purl = None
                   for ref in p.get("externalRefs", []) or []:
                       rtype = (ref.get("referenceType") or ref.get("type") or "").lower()
@@ -198,7 +263,7 @@ jobs:
                   name_p, ver_p, _ = extract_from_purl(purl) if purl else (None, None, None)
                   if name_p: name = name_p
                   if not version: version = clean_version(ver_p)
-                  git_url = normalize_git_url(best_git_url_from_spdx(p))  # no purl fallback
+                  git_url = normalize_git_url(best_git_url_from_spdx(p))  # with pkg-locator last resort
                   license_sbom = pick_spdx_license_from_spdx(p)
                   if name:
                       out.append({"component": name, "version": version, "git_url": git_url, "license": license_sbom})
