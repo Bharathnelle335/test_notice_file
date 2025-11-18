@@ -1,11 +1,9 @@
 name: Extract components & fetch copyrights + licenses
-
 on:
   workflow_dispatch:
   push:
     branches: [ main, master ]
   pull_request:
-
 permissions:
   contents: read
 
@@ -15,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
-      parts: ${{ steps.split.outputs.parts }}   # JSON array of part indexes: ["0","1","2", ...]
+      parts: ${{ steps.split.outputs.parts }} # JSON array of part indexes: ["0","1","2", ...]
       part_count: ${{ steps.split.outputs.part_count }}
     steps:
       - name: Checkout
@@ -26,7 +24,7 @@ jobs:
         run: |
           set -euo pipefail
           test -f "sboms/spdx-lite.json" || { echo "Missing sboms/spdx-lite.json" >&2; exit 1; }
-          test -f "sboms/cyclonedx.json"  || { echo "Missing sboms/cyclonedx.json"  >&2; exit 1; }
+          test -f "sboms/cyclonedx.json" || { echo "Missing sboms/cyclonedx.json" >&2; exit 1; }
 
       - name: Set up Python (3.11 for ScanCode 32.4.x)
         uses: actions/setup-python@v5
@@ -45,206 +43,204 @@ jobs:
       - name: Generate components.json (URL logic: ignore generic purl, narrow pkg-locator fallback; HARD FAIL on missing URLs)
         id: generate
         shell: bash
-        env:
-          PYCODE: |
-            import json, os, re, urllib.parse, sys
-
-            SPDX_PATH = "sboms/spdx-lite.json"
-            CDX_PATH = "sboms/cyclonedx.json"
-
-            def load_json(path):
-                if not os.path.exists(path): return None
-                with open(path, 'r', encoding='utf-8') as f: return json.load(f)
-
-            HOSTS = ("github.com", "gitlab.com", "bitbucket.org")
-
-            def is_git_host(url):
-                if not url: return False
-                u = url.strip().lower()
-                return ("github.com" in u) or ("gitlab.com" in u) or ("bitbucket.org" in u) or u.startswith(("git://","git@","ssh://"))
-
-            def normalize_git_url(url):
-                # Accept only repo/VCS URLs. If startswith pkg:, ignore. Add .git to http(s) host URLs.
-                if not url: return None
-                u = url.strip()
-                if u.startswith("pkg:"):
-                    return None
-                if not (u.startswith(("http://","https://","ssh://","git://","git@")) or is_git_host(u)):
-                    return None
-                if u.startswith(("http://","https://")) and any(h in u for h in HOSTS):
-                    uu = u.rstrip("/")
-                    if not uu.endswith(".git"): uu += ".git"
-                    return uu
-                return u
-
-            def last_segment(name):
-                if not name: return None
-                s = name
-                for sep in ('/', ':'):
-                    if sep in s: s = s.split(sep)[-1]
-                return s
-
-            def extract_from_purl(purl):
-                # Only for name/version convenience; NEVER used for URL.
-                if not purl: return (None, None, None)
-                s = purl.strip()
-                if s.startswith("pkg:"): s = s[4:]
-                s = s.split('#', 1)[0].split('?', 1)[0]
-                version = None
-                base = s
-                if '@' in s:
-                    base, version = s.rsplit('@', 1)
-                component = urllib.parse.unquote(base.split('/')[-1])
-                return (component, version, None)
-
-            def clean_version(ver):
-                if not ver: return None
-                v = str(ver).strip().lower()
-                if v in {"", "unknown", "n/a", "na", "none"}: return None
-                return str(ver).strip()
-
-            def pick_spdx_license_from_spdx(pkg):
-                return (pkg.get("licenseConcluded") or pkg.get("licenseDeclared") or None)
-
-            def pick_spdx_license_from_cdx(comp):
-                for lic in comp.get("licenses", []) or []:
-                    lobj = lic.get("license") or {}
-                    spdx_id = lobj.get("id")
-                    expr = lic.get("expression")
-                    if expr: return expr
-                    if spdx_id: return spdx_id
-                return None
-
-            # Narrow fallback for pkg-like locators embedded in externalRefs
-            def _git_url_from_pkgish_locator(locator):
-                if not locator: return None
-                s = locator.strip()
-                if not s.startswith("pkg:"):
-                    return None
-                body = s[4:]
-                body = body.split('#', 1)[0].split('?', 1)[0]
-                if '@' in body:
-                    body, _ = body.rsplit('@', 1)
-                parts = body.strip("/").split("/")
-                if len(parts) < 3: return None
-                host, owner, repo = None, None, None
-                if parts[0] == "golang" and parts[1] in HOSTS and len(parts) >= 4:
-                    host, owner, repo = parts[1], parts[2], parts[3]
-                elif parts[0] == "github" and len(parts) >= 3:
-                    host, owner, repo = "github.com", parts[1], parts[2]
-                elif parts[0] in HOSTS and len(parts) >= 3:
-                    host, owner, repo = parts[0], parts[1], parts[2]
-                if host and owner and repo:
-                    repo = repo.rstrip(".git")
-                    return "https://%s/%s/%s.git" % (host, owner, repo)
-                return None
-
-            def best_git_url_from_spdx(pkg):
-                if not pkg: return None
-                u = normalize_git_url(pkg.get("downloadLocation") or "")
-                if u: return u
-                u = normalize_git_url(pkg.get("homepage") or "")
-                if u: return u
-                for ref in pkg.get("externalRefs", []) or []:
-                    rtype = (ref.get("referenceType") or ref.get("type") or "").lower()
-                    loc = ref.get("referenceLocator") or ref.get("locator") or ""
-                    if rtype in {"vcs","repository","scm"} or is_git_host(loc):
-                        u = normalize_git_url(loc)
-                        if u: return u
-                # last resort: pkg-like locator with embedded host path
-                for ref in pkg.get("externalRefs", []) or []:
-                    loc = ref.get("referenceLocator") or ref.get("locator") or ""
-                    if isinstance(loc, str) and loc.startswith("pkg:"):
-                        u = _git_url_from_pkgish_locator(loc)
-                        if u: return u
-                return None
-
-            def best_git_url_from_cdx(comp, purl):
-                if comp:
-                    for ref in comp.get("externalReferences", []) or []:
-                        rtype = (ref.get("type") or "").lower()
-                        url = ref.get("url") or ref.get("locator") or ""
-                        if rtype in {"vcs","repository","scm","source"} or is_git_host(url):
-                            u = normalize_git_url(url)
-                            if u: return u
-                    u = normalize_git_url(comp.get("repository") or "")
-                    if u: return u
-                    for ref in comp.get("externalReferences", []) or []:
-                        loc = ref.get("url") or ref.get("locator") or ""
-                        if isinstance(loc, str) and loc.startswith("pkg:"):
-                            u = _git_url_from_pkgish_locator(loc)
-                            if u: return u
-                return None
-
-            def parse_cyclonedx(path):
-                out = []
-                data = load_json(path)
-                if not data: return out
-                for c in data.get("components", []):
-                    purl = c.get("purl")
-                    name_p, ver_p, _ = extract_from_purl(purl) if purl else (None, None, None)
-                    name = name_p or last_segment(c.get("name"))
-                    version = clean_version(c.get("version") or ver_p)
-                    git_url = normalize_git_url(best_git_url_from_cdx(c, purl))
-                    license_sbom = pick_spdx_license_from_cdx(c)
-                    if name:
-                        out.append({"component": name, "version": version, "git_url": git_url, "license": license_sbom})
-                return out
-
-            def parse_spdx(path):
-                out = []
-                data = load_json(path)
-                if not data: return out
-                pkgs = data.get("packages") or []
-                for p in pkgs:
-                    name = last_segment(p.get("name") or p.get("packageName"))
-                    version = clean_version(p.get("versionInfo"))
-                    # purl only for name/version, never URL
-                    purl = None
-                    for ref in p.get("externalRefs", []) or []:
-                        rtype = (ref.get("referenceType") or ref.get("type") or "").lower()
-                        loc = ref.get("referenceLocator") or ref.get("locator") or ""
-                        if rtype == "purl" and loc:
-                            purl = loc
-                            break
-                    name_p, ver_p, _ = extract_from_purl(purl) if purl else (None, None, None)
-                    if name_p: name = name_p
-                    if not version: version = clean_version(ver_p)
-                    git_url = normalize_git_url(best_git_url_from_spdx(p))
-                    license_sbom = pick_spdx_license_from_spdx(p)
-                    if name:
-                        out.append({"component": name, "version": version, "git_url": git_url, "license": license_sbom})
-                return out
-
-            comps = parse_cyclonedx(CDX_PATH) + parse_spdx(SPDX_PATH)
-
-            # Merge by (component, version); prefer entries that have license/git_url.
-            merged = {}
-            for c in comps:
-                key = (c["component"], c.get("version") or "")
-                prev = merged.get(key)
-                if not prev:
-                    merged[key] = c
-                else:
-                    if not prev.get("license") and c.get("license"):
-                        prev["license"] = c["license"]
-                    if not prev.get("git_url") and c.get("git_url"):
-                        prev["git_url"] = c["git_url"]
-
-            result = list(merged.values())
-            os.makedirs("artifacts", exist_ok=True)
-            with open("artifacts/components.json", "w", encoding="utf-8") as f:
-                json.dump({"components": result}, f, indent=2, ensure_ascii=False)
-            print("Wrote artifacts/components.json with %d components." % len(result))
-
-            # HARD FAIL if any component lacks a usable repo URL
-            missing = [c["component"] for c in result if not c.get("git_url")]
-            if missing:
-                print("ERROR: No git_url found for components: %s" % ", ".join(missing))
-                sys.exit(2)
         run: |
           set -euo pipefail
-          python -c "$PYCODE"
+          python <<'PY'
+          import json, os, re, urllib.parse, sys
+
+          SPDX_PATH = "sboms/spdx-lite.json"
+          CDX_PATH = "sboms/cyclonedx.json"
+
+          def load_json(path):
+              if not os.path.exists(path): return None
+              with open(path, 'r', encoding='utf-8') as f: return json.load(f)
+
+          HOSTS = ("github.com", "gitlab.com", "bitbucket.org")
+
+          def is_git_host(url):
+              if not url: return False
+              u = url.strip().lower()
+              return ("github.com" in u) or ("gitlab.com" in u) or ("bitbucket.org" in u) or u.startswith(("git://","git@","ssh://"))
+
+          def normalize_git_url(url):
+              # Accept only repo/VCS URLs. If startswith pkg:, ignore. Add .git to http(s) host URLs.
+              if not url: return None
+              u = url.strip()
+              if u.startswith("pkg:"):
+                  return None
+              if not (u.startswith(("http://","https://","ssh://","git://","git@")) or is_git_host(u)):
+                  return None
+              if u.startswith(("http://","https://")) and any(h in u for h in HOSTS):
+                  uu = u.rstrip("/")
+                  if not uu.endswith(".git"): uu += ".git"
+                  return uu
+              return u
+
+          def last_segment(name):
+              if not name: return None
+              s = name
+              for sep in ('/', ':'):
+                  if sep in s: s = s.split(sep)[-1]
+              return s
+
+          def extract_from_purl(purl):
+              # Only for name/version convenience; NEVER used for URL.
+              if not purl: return (None, None, None)
+              s = purl.strip()
+              if s.startswith("pkg:"): s = s[4:]
+              s = s.split('#', 1)[0].split('?', 1)[0]
+              version = None
+              base = s
+              if '@' in s:
+                  base, version = s.rsplit('@', 1)
+              component = urllib.parse.unquote(base.split('/')[-1])
+              return (component, version, None)
+
+          def clean_version(ver):
+              if not ver: return None
+              v = str(ver).strip().lower()
+              if v in {"", "unknown", "n/a", "na", "none"}: return None
+              return str(ver).strip()
+
+          def pick_spdx_license_from_spdx(pkg):
+              return (pkg.get("licenseConcluded") or pkg.get("licenseDeclared") or None)
+
+          def pick_spdx_license_from_cdx(comp):
+              for lic in comp.get("licenses", []) or []:
+                  lobj = lic.get("license") or {}
+                  spdx_id = lobj.get("id")
+                  expr = lic.get("expression")
+                  if expr: return expr
+                  if spdx_id: return spdx_id
+              return None
+
+          # Narrow fallback for pkg-like locators embedded in externalRefs
+          def _git_url_from_pkgish_locator(locator):
+              if not locator: return None
+              s = locator.strip()
+              if not s.startswith("pkg:"):
+                  return None
+              body = s[4:]
+              body = body.split('#', 1)[0].split('?', 1)[0]
+              if '@' in body:
+                  body, _ = body.rsplit('@', 1)
+              parts = body.strip("/").split("/")
+              if len(parts) < 3: return None
+              host, owner, repo = None, None, None
+              if parts[0] == "golang" and parts[1] in HOSTS and len(parts) >= 4:
+                  host, owner, repo = parts[1], parts[2], parts[3]
+              elif parts[0] == "github" and len(parts) >= 3:
+                  host, owner, repo = "github.com", parts[1], parts[2]
+              elif parts[0] in HOSTS and len(parts) >= 3:
+                  host, owner, repo = parts[0], parts[1], parts[2]
+              if host and owner and repo:
+                  repo = repo.rstrip(".git")
+                  return f"https://{host}/{owner}/{repo}.git"
+              return None
+
+          def best_git_url_from_spdx(pkg):
+              if not pkg: return None
+              u = normalize_git_url(pkg.get("downloadLocation") or "")
+              if u: return u
+              u = normalize_git_url(pkg.get("homepage") or "")
+              if u: return u
+              for ref in pkg.get("externalRefs", []) or []:
+                  rtype = (ref.get("referenceType") or ref.get("type") or "").lower()
+                  loc = ref.get("referenceLocator") or ref.get("locator") or ""
+                  if rtype in {"vcs","repository","scm"} or is_git_host(loc):
+                      u = normalize_git_url(loc)
+                      if u: return u
+              # last resort: pkg-like locator with embedded host path
+              for ref in pkg.get("externalRefs", []) or []:
+                  loc = ref.get("referenceLocator") or ref.get("locator") or ""
+                  if isinstance(loc, str) and loc.startswith("pkg:"):
+                      u = _git_url_from_pkgish_locator(loc)
+                      if u: return u
+              return None
+
+          def best_git_url_from_cdx(comp, purl):
+              if comp:
+                  for ref in comp.get("externalReferences", []) or []:
+                      rtype = (ref.get("type") or "").lower()
+                      url = ref.get("url") or ref.get("locator") or ""
+                      if rtype in {"vcs","repository","scm","source"} or is_git_host(url):
+                          u = normalize_git_url(url)
+                          if u: return u
+                  u = normalize_git_url(comp.get("repository") or "")
+                  if u: return u
+                  for ref in comp.get("externalReferences", []) or []:
+                      loc = ref.get("url") or ref.get("locator") or ""
+                      if isinstance(loc, str) and loc.startswith("pkg:"):
+                          u = _git_url_from_pkgish_locator(loc)
+                          if u: return u
+              return None
+
+          def parse_cyclonedx(path):
+              out = []
+              data = load_json(path)
+              if not data: return out
+              for c in data.get("components", []):
+                  purl = c.get("purl")
+                  name_p, ver_p, _ = extract_from_purl(purl) if purl else (None, None, None)
+                  name = name_p or last_segment(c.get("name"))
+                  version = clean_version(c.get("version") or ver_p)
+                  git_url = normalize_git_url(best_git_url_from_cdx(c, purl))
+                  license_sbom = pick_spdx_license_from_cdx(c)
+                  if name:
+                      out.append({"component": name, "version": version, "git_url": git_url, "license": license_sbom})
+              return out
+
+          def parse_spdx(path):
+              out = []
+              data = load_json(path)
+              if not data: return out
+              pkgs = data.get("packages") or []
+              for p in pkgs:
+                  name = last_segment(p.get("name") or p.get("packageName"))
+                  version = clean_version(p.get("versionInfo"))
+                  # purl only for name/version, never URL
+                  purl = None
+                  for ref in p.get("externalRefs", []) or []:
+                      rtype = (ref.get("referenceType") or ref.get("type") or "").lower()
+                      loc = ref.get("referenceLocator") or ref.get("locator") or ""
+                      if rtype == "purl" and loc:
+                          purl = loc
+                          break
+                  name_p, ver_p, _ = extract_from_purl(purl) if purl else (None, None, None)
+                  if name_p: name = name_p
+                  if not version: version = clean_version(ver_p)
+                  git_url = normalize_git_url(best_git_url_from_spdx(p))
+                  license_sbom = pick_spdx_license_from_spdx(p)
+                  if name:
+                      out.append({"component": name, "version": version, "git_url": git_url, "license": license_sbom})
+              return out
+
+          comps = parse_cyclonedx(CDX_PATH) + parse_spdx(SPDX_PATH)
+          # Merge by (component, version); prefer entries that have license/git_url.
+          merged = {}
+          for c in comps:
+              key = (c["component"], c.get("version") or "")
+              prev = merged.get(key)
+              if not prev:
+                  merged[key] = c
+              else:
+                  if not prev.get("license") and c.get("license"):
+                      prev["license"] = c["license"]
+                  if not prev.get("git_url") and c.get("git_url"):
+                      prev["git_url"] = c["git_url"]
+
+          result = list(merged.values())
+          os.makedirs("artifacts", exist_ok=True)
+          with open("artifacts/components.json", "w", encoding="utf-8") as f:
+              json.dump({"components": result}, f, indent=2, ensure_ascii=False)
+          print("Wrote artifacts/components.json with %d components." % len(result))
+
+          # HARD FAIL if any component lacks a usable repo URL
+          missing = [c["component"] for c in result if not c.get("git_url")]
+          if missing:
+              print("ERROR: No git_url found for components: %s" % ", ".join(missing))
+              sys.exit(2)
+          PY
 
       - name: Upload components.json
         uses: actions/upload-artifact@v4
@@ -255,26 +251,25 @@ jobs:
       - name: Split components into parts of 5
         id: split
         shell: bash
-        env:
-          PYCODE: |
-            import json, os
-            os.makedirs("artifacts", exist_ok=True)
-            with open("artifacts/components.json","r",encoding="utf-8") as f:
-                comps = json.load(f).get("components", [])
-            size = 5
-            parts = [comps[i:i+size] for i in range(0, len(comps), size)]
-            idxs = []
-            for i, part in enumerate(parts):
-                with open("artifacts/components_part_%d.json" % i, "w", encoding="utf-8") as f:
-                    json.dump({"components": part}, f, indent=2, ensure_ascii=False)
-                idxs.append(str(i))
-            with open(os.environ["GITHUB_OUTPUT"], "a") as gh:
-                gh.write("parts=%s\n" % json.dumps(idxs))
-                gh.write("part_count=%d\n" % len(parts))
-            print("Split %d components into %d parts of up to %d." % (len(comps), len(parts), size))
         run: |
           set -euo pipefail
-          python -c "$PYCODE"
+          python <<'PY'
+          import json, os
+          os.makedirs("artifacts", exist_ok=True)
+          with open("artifacts/components.json","r",encoding="utf-8") as f:
+              comps = json.load(f).get("components", [])
+          size = 5
+          parts = [comps[i:i+size] for i in range(0, len(comps), size)]
+          idxs = []
+          for i, part in enumerate(parts):
+              with open(f"artifacts/components_part_{i}.json", "w", encoding="utf-8") as f:
+                  json.dump({"components": part}, f, indent=2, ensure_ascii=False)
+              idxs.append(str(i))
+          with open(os.environ["GITHUB_OUTPUT"], "a") as gh:
+              gh.write("parts=%s\n" % json.dumps(idxs))
+              gh.write("part_count=%d\n" % len(parts))
+          print("Split %d components into %d parts of up to %d." % (len(comps), len(parts), size))
+          PY
 
       - name: Upload parts
         uses: actions/upload-artifact@v4
@@ -330,66 +325,61 @@ jobs:
         env:
           SCANCODE: ${{ env.SCANCODE }}
           PART_INDEX: ${{ matrix.part }}
-          PYCODE: |
-            import json, os, subprocess, shlex, re
-            part_index = os.environ["PART_INDEX"]
-            SCANCODE = os.environ["SCANCODE"]
-            with open("artifacts/parts/components_part_%s.json" % part_index,"r",encoding="utf-8") as f:
-                comps = json.load(f).get("components", [])
-
-            os.makedirs("repos_part_%s" % part_index, exist_ok=True)
-            os.makedirs("scancode_results_part_%s" % part_index, exist_ok=True)
-
-            def sanitize(s):
-                return re.sub(r'[^A-Za-z0-9_.-]+','-', (s or "")).strip('-') or "unknown"
-
-            def run(cmd):
-                print("+", cmd)
-                return subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-
-            for item in comps:
-                name    = item.get("component")
-                version = item.get("version")  # None => default branch
-                git_url = item.get("git_url")
-
-                out_json = os.path.join("scancode_results_part_%s" % part_index, sanitize(name) + ".json")
-
-                if not name or not git_url:
-                    with open(out_json, "w", encoding="utf-8") as f:
-                        json.dump({"files": [], "status": "skipped:no-git-url"}, f)
-                    continue
-
-                dest = os.path.join("repos_part_%s" % part_index, sanitize(name) + ("-%s" % sanitize(version) if version else ""))
-
-                if not os.path.exists(dest):
-                    if version:
-                        p = run("git clone --depth 1 --branch %s %s %s" % (shlex.quote(str(version)), shlex.quote(git_url), shlex.quote(dest)))
-                        if p.returncode != 0:
-                            print(p.stdout)
-                            with open(out_json, "w", encoding="utf-8") as f:
-                                json.dump({"files": [], "status": "skipped:clone-failed"}, f)
-                            continue
-                    else:
-                        p = run("git clone --depth 1 %s %s" % (shlex.quote(git_url), shlex.quote(dest)))
-                        if p.returncode != 0:
-                            print(p.stdout)
-                            with open(out_json, "w", encoding="utf-8") as f:
-                                json.dump({"files": [], "status": "skipped:clone-failed"}, f)
-                            continue
-
-                cmd = (
-                  "%s --processes 4 "
-                  "--exclude .git --exclude vendor --exclude node_modules --exclude tests --exclude test --exclude docs "
-                  "--copyright --license --strip-root "
-                  "--json-pp %s %s"
-                ) % (shlex.quote(SCANCODE), shlex.quote(out_json), shlex.quote(dest))
-                p = run(cmd)
-                if p.returncode != 0:
-                    print(p.stdout)
         shell: bash
         run: |
           set -euo pipefail
-          python -c "$PYCODE"
+          python <<'PY'
+          import json, os, subprocess, shlex, re
+          part_index = os.environ["PART_INDEX"]
+          SCANCODE = os.environ["SCANCODE"]
+          with open(f"artifacts/parts/components_part_{part_index}.json","r",encoding="utf-8") as f:
+              comps = json.load(f).get("components", [])
+          os.makedirs(f"repos_part_{part_index}", exist_ok=True)
+          os.makedirs(f"scancode_results_part_{part_index}", exist_ok=True)
+
+          def sanitize(s):
+              return re.sub(r'[^A-Za-z0-9_.\-]+','-', (s or "")).strip('-') or "unknown"
+
+          def run(cmd):
+              print("+", cmd)
+              return subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+          for item in comps:
+              name = item.get("component")
+              version = item.get("version")  # None => default branch
+              git_url = item.get("git_url")
+              out_json = os.path.join(f"scancode_results_part_{part_index}", sanitize(name) + ".json")
+              if not name or not git_url:
+                  with open(out_json, "w", encoding="utf-8") as f:
+                      json.dump({"files": [], "status": "skipped:no-git-url"}, f)
+                  continue
+              dest = os.path.join(f"repos_part_{part_index}", sanitize(name) + (f"-{sanitize(version)}" if version else ""))
+              if not os.path.exists(dest):
+                  if version:
+                      p = run("git clone --depth 1 --branch %s %s %s" % (shlex.quote(str(version)), shlex.quote(git_url), shlex.quote(dest)))
+                      if p.returncode != 0:
+                          print(p.stdout)
+                          with open(out_json, "w", encoding="utf-8") as f:
+                              json.dump({"files": [], "status": "skipped:clone-failed"}, f)
+                          continue
+                  else:
+                      p = run("git clone --depth 1 %s %s" % (shlex.quote(git_url), shlex.quote(dest)))
+                      if p.returncode != 0:
+                          print(p.stdout)
+                          with open(out_json, "w", encoding="utf-8") as f:
+                              json.dump({"files": [], "status": "skipped:clone-failed"}, f)
+                          continue
+
+              cmd = (
+                  f"{shlex.quote(SCANCODE)} --processes 4 "
+                  "--exclude .git --exclude vendor --exclude node_modules --exclude tests --exclude test --exclude docs "
+                  "--copyright --license --strip-root "
+                  f"--json-pp {shlex.quote(out_json)} {shlex.quote(dest)}"
+              )
+              p = run(cmd)
+              if p.returncode != 0:
+                  print(p.stdout)
+          PY
 
       - name: Upload raw ScanCode outputs (this part)
         uses: actions/upload-artifact@v4
@@ -402,79 +392,77 @@ jobs:
       - name: Aggregate copyrights (JSON) for this part
         env:
           PART_INDEX: ${{ matrix.part }}
-          PYCODE: |
-            import json, os, re
-            idx = os.environ["PART_INDEX"]
-
-            def sanitize(s):
-                import re
-                return re.sub(r'[^A-Za-z0-9_.-]+','-', (s or "")).strip('-') or "unknown"
-
-            with open("artifacts/parts/components_part_%s.json" % idx,"r",encoding="utf-8") as f:
-                comps = json.load(f).get("components", [])
-
-            def load_raw(name):
-                p = os.path.join("scancode_results_part_%s" % idx, sanitize(name) + ".json")
-                if os.path.exists(p):
-                    with open(p,"r",encoding="utf-8") as f:
-                        return json.load(f)
-                return {"files": [], "status": "skipped:no-scan"}
-
-            results = []
-            for item in comps:
-                name     = item.get("component")
-                version  = item.get("version")
-                git_url  = item.get("git_url")
-                sbom_lic = item.get("license")
-                data     = load_raw(name)
-
-                unique = set()
-                per_file = []
-                for fe in data.get("files", []) or []:
-                    path = fe.get("path") or fe.get("location") or ""
-                    file_statements, holders = [], []
-                    for c in fe.get("copyrights", []) or []:
-                        single = (c.get("copyright") or "").strip()
-                        if single:
-                            file_statements.append(single)
-                            unique.add(single)
-                        for s in c.get("statements", []) or []:
-                            s = (s or "").strip()
-                            if s:
-                                file_statements.append(s)
-                                unique.add(s)
-                        for h in c.get("holders", []) or []:
-                            h = (h or "").strip()
-                            if h:
-                                holders.append(h)
-                    for a in fe.get("authors", []) or []:
-                        author = (a.get("author") or "").strip()
-                        if author:
-                            file_statements.append(author)
-                            unique.add(author)
-                    if file_statements or holders:
-                        per_file.append({"path": path, "statements": file_statements, "holders": holders})
-
-                results.append({
-                    "component": name,
-                    "version": version,
-                    "git_url": git_url,
-                    "license": sbom_lic,
-                    "status": data.get("status", "scanned"),
-                    "copyrights": {
-                        "unique_statements": sorted(unique),
-                        "per_file": per_file
-                    }
-                })
-
-            os.makedirs("artifacts", exist_ok=True)
-            with open("artifacts/component_copyrights_part_%s.json" % idx,"w",encoding="utf-8") as f:
-                json.dump({"components": results}, f, indent=2, ensure_ascii=False)
-            print("Wrote artifacts/component_copyrights_part_%s.json with %d components." % (idx, len(results)))
         shell: bash
         run: |
           set -euo pipefail
-          python -c "$PYCODE"
+          python <<'PY'
+          import json, os, re
+          idx = os.environ["PART_INDEX"]
+
+          def sanitize(s):
+              return re.sub(r'[^A-Za-z0-9_.\-]+','-', (s or "")).strip('-') or "unknown"
+
+          with open(f"artifacts/parts/components_part_{idx}.json","r",encoding="utf-8") as f:
+              comps = json.load(f).get("components", [])
+
+          def load_raw(name):
+              p = os.path.join(f"scancode_results_part_{idx}", sanitize(name) + ".json")
+              if os.path.exists(p):
+                  with open(p,"r",encoding="utf-8") as f:
+                      return json.load(f)
+              return {"files": [], "status": "skipped:no-scan"}
+
+          results = []
+          for item in comps:
+              name = item.get("component")
+              version = item.get("version")
+              git_url = item.get("git_url")
+              sbom_lic = item.get("license")
+              data = load_raw(name)
+              unique = set()
+              per_file = []
+              for fe in data.get("files", []) or []:
+                  path = fe.get("path") or fe.get("location") or ""
+                  file_statements, holders = [], []
+                  for c in fe.get("copyrights", []) or []:
+                      single = (c.get("copyright") or "").strip()
+                      if single:
+                          file_statements.append(single)
+                          unique.add(single)
+                      for s in c.get("statements", []) or []:
+                          s = (s or "").strip()
+                          if s:
+                              file_statements.append(s)
+                              unique.add(s)
+                      for h in c.get("holders", []) or []:
+                          h = (h or "").strip()
+                          if h:
+                              holders.append(h)
+                  for a in fe.get("authors", []) or []:
+                      author = (a.get("author") or "").strip()
+                      if author:
+                          file_statements.append(author)
+                          unique.add(author)
+                  if file_statements or holders:
+                      per_file.append({"path": path, "statements": file_statements, "holders": holders})
+
+              results.append({
+                  "component": name,
+                  "version": version,
+                  "git_url": git_url,
+                  "license": sbom_lic,
+                  "status": data.get("status", "scanned"),
+                  "copyrights": {
+                      "unique_statements": sorted(unique),
+                      "per_file": per_file
+                  }
+              })
+
+          os.makedirs("artifacts", exist_ok=True)
+          with open(f"artifacts/component_copyrights_part_{idx}.json","w",encoding="utf-8") as f:
+              json.dump({"components": results}, f, indent=2, ensure_ascii=False)
+          print(f"Wrote artifacts/component_copyrights_part_{idx}.json with {len(results)} components.")
+          PY
 
       - name: Upload part aggregated copyrights (JSON)
         uses: actions/upload-artifact@v4
@@ -487,73 +475,77 @@ jobs:
       - name: Build attribution (YAML + TXT) for this part
         env:
           PART_INDEX: ${{ matrix.part }}
-          PYCODE: |
-            import json, os, re
-            idx = os.environ["PART_INDEX"]
-
-            with open("artifacts/parts/components_part_%s.json" % idx,"r",encoding="utf-8") as f:
-                components = json.load(f).get("components", [])
-            with open("artifacts/component_copyrights_part_%s.json" % idx,"r",encoding="utf-8") as f:
-                agg = json.load(f).get("components", [])
-
-            by_name = {c.get("component"): c for c in agg}
-            def esc(s):
-                if s is None: return '""'
-                if re.search(r'[:#\-\[\]{},&*?]|^\s|\s$', s):
-                    return '"' + s.replace('"','\\"') + '"'
-                return s
-
-            lines = []
-            lines.append("components:")
-            for comp in components:
-                name = comp.get("component")
-                version = comp.get("version")
-                url = comp.get("git_url") or ""
-                lic = comp.get("license") or ""
-                lines.append("  - component: " + esc(name))
-                if version is not None:
-                    lines.append("    version: " + esc(version))
-                lines.append("    url: " + esc(url))
-                lines.append("    license: " + esc(lic))
-                cps = (by_name.get(name, {}) or {}).get("copyrights", {}).get("unique_statements", []) or []
-                if cps:
-                    lines.append("    copyrights:")
-                    for c in cps:
-                        lines.append("      - " + esc(c))
-                else:
-                    lines.append("    copyrights: []")
-
-            os.makedirs("artifacts", exist_ok=True)
-            with open("artifacts/component_attribution_part_%s.yaml" % idx,"w",encoding="utf-8") as f:
-                f.write("\n".join(lines) + "\n")
-
-            t = []
-            for comp in components:
-                name = comp.get("component") or ""
-                version = comp.get("version")
-                url = comp.get("git_url") or ""
-                lic = comp.get("license") or ""
-                t.append("Component: %s" % name)
-                if version:
-                    t.append("Version: %s" % version)
-                t.append("URL: %s" % url)
-                t.append("License: %s" % lic)
-                t.append("Copyrights:")
-                cps = (by_name.get(name, {}) or {}).get("copyrights", {}).get("unique_statements", []) or []
-                if cps:
-                    for s in cps:
-                        t.append("- %s" % s)
-                else:
-                    t.append("- (none)")
-                t.append("")
-            with open("artifacts/component_attribution_part_%s.txt" % idx,"w",encoding="utf-8") as f:
-                f.write("\n".join(t).rstrip() + "\n")
-
-            print("Wrote per-part attribution YAML/TXT for part %s." % idx)
         shell: bash
         run: |
           set -euo pipefail
-          python -c "$PYCODE"
+          python <<'PY'
+          import json, os, re
+          idx = os.environ["PART_INDEX"]
+
+          with open(f"artifacts/parts/components_part_{idx}.json","r",encoding="utf-8") as f:
+              components = json.load(f).get("components", [])
+          with open(f"artifacts/component_copyrights_part_{idx}.json","r",encoding="utf-8") as f:
+              agg = json.load(f).get("components", [])
+
+          by_name = {c.get("component"): c for c in agg}
+
+          def esc(s):
+              if s is None: return '""'
+              s = str(s)
+              # Quote if YAML-sensitive chars or leading/trailing whitespace
+              if re.search(r'[:#\-\[\]\{\},&\*?]|^\s|\s$', s):
+                  return '"' + s.replace('"','\\"') + '"'
+              return s
+
+          # YAML
+          lines = ["components:"]
+          for comp in components:
+              name = comp.get("component")
+              version = comp.get("version")
+              url = comp.get("git_url") or ""
+              lic = comp.get("license") or ""
+              lines.append(" - component: " + esc(name))
+              if version is not None:
+                  lines.append("   version: " + esc(version))
+              lines.append("   url: " + esc(url))
+              lines.append("   license: " + esc(lic))
+              cps = (by_name.get(name, {}) or {}).get("copyrights", {}).get("unique_statements", []) or []
+              if cps:
+                  lines.append("   copyrights:")
+                  for c in cps:
+                      lines.append("     - " + esc(c))
+              else:
+                  lines.append("   copyrights: []")
+
+          os.makedirs("artifacts", exist_ok=True)
+          with open(f"artifacts/component_attribution_part_{idx}.yaml","w",encoding="utf-8") as f:
+              f.write("\n".join(lines) + "\n")
+
+          # TXT
+          t = []
+          for comp in components:
+              name = comp.get("component") or ""
+              version = comp.get("version")
+              url = comp.get("git_url") or ""
+              lic = comp.get("license") or ""
+              t.append(f"Component: {name}")
+              if version:
+                  t.append(f"Version: {version}")
+              t.append(f"URL: {url}")
+              t.append(f"License: {lic}")
+              t.append("Copyrights:")
+              cps = (by_name.get(name, {}) or {}).get("copyrights", {}).get("unique_statements", []) or []
+              if cps:
+                  for s in cps:
+                      t.append(f"- {s}")
+              else:
+                  t.append("- (none)")
+              t.append("")
+          with open(f"artifacts/component_attribution_part_{idx}.txt","w",encoding="utf-8") as f:
+              f.write("\n".join(t).rstrip() + "\n")
+
+          print(f"Wrote per-part attribution YAML/TXT for part {idx}.")
+          PY
 
       - name: Upload per-part attribution (YAML)
         uses: actions/upload-artifact@v4
@@ -580,87 +572,85 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: components-json
-        # default path: ./ (we read with glob/PWD)
+        # default path: ./ (artifact preserves original subpaths)
 
       - name: Build cumulative PROGRESS (JSON + YAML + TXT) from available parts
         shell: bash
-        env:
-          PYCODE: |
-            import json, os, glob, re
-
-            os.makedirs("artifacts", exist_ok=True)
-
-            with open("artifacts/components.json","r",encoding="utf-8") as f:
-                base = json.load(f).get("components", [])
-
-            merged = {}
-            for fp in sorted(glob.glob("component*_part_*.json")):
-                with open(fp,"r",encoding="utf-8") as f:
-                    data = json.load(f).get("components", [])
-                    for c in data:
-                        key = (c.get("component"), c.get("version") or "")
-                        merged[key] = c
-
-            progress = []
-            for comp in base:
-                key = (comp.get("component"), comp.get("version") or "")
-                if key in merged:
-                    progress.append(merged[key])
-
-            with open("artifacts/component_copyrights_progress.json","w",encoding="utf-8") as f:
-                json.dump({"components": progress}, f, indent=2, ensure_ascii=False)
-
-            def esc(s):
-                if s is None: return '""'
-                if re.search(r'[:#\-\[\]{},&*?]|^\s|\s$', s):
-                    return '"' + s.replace('"','\\"') + '"'
-                return s
-
-            yl = ["components:"]
-            for c in progress:
-                name   = c.get("component")
-                version= c.get("version")
-                url    = c.get("git_url") or ""
-                lic    = c.get("license") or ""
-                yl.append("  - component: " + esc(name))
-                if version is not None:
-                    yl.append("    version: " + esc(version))
-                yl.append("    url: " + esc(url))
-                yl.append("    license: " + esc(lic))
-                cps = c.get("copyrights", {}).get("unique_statements", []) or []
-                if cps:
-                    yl.append("    copyrights:")
-                    for s in cps:
-                        yl.append("      - " + esc(s))
-                else:
-                    yl.append("    copyrights: []")
-            with open("artifacts/component_attribution_progress.yaml","w",encoding="utf-8") as f:
-                f.write("\n".join(yl) + "\n")
-
-            tl = []
-            for c in progress:
-                name    = c.get("component") or ""
-                version = c.get("version")
-                url     = c.get("git_url") or ""
-                lic     = c.get("license") or ""
-                tl.append("Component: %s" % name)
-                if version: tl.append("Version: %s" % version)
-                tl.append("URL: %s" % url)
-                tl.append("License: %s" % lic)
-                tl.append("Copyrights:")
-                cps = c.get("copyrights", {}).get("unique_statements", []) or []
-                if cps:
-                    for s in cps: tl.append("- %s" % s)
-                else:
-                    tl.append("- (none)")
-                tl.append("")
-            with open("artifacts/component_attribution_progress.txt","w",encoding="utf-8") as f:
-                f.write("\n".join(tl).rstrip() + "\n")
-
-            print("Progress: %d components merged so far." % len(progress))
         run: |
           set -euo pipefail
-          python -c "$PYCODE"
+          python <<'PY'
+          import json, os, glob, re
+          os.makedirs("artifacts", exist_ok=True)
+          with open("artifacts/components.json","r",encoding="utf-8") as f:
+              base = json.load(f).get("components", [])
+          merged = {}
+          for fp in sorted(glob.glob("component*_part_*.json")):
+              with open(fp,"r",encoding="utf-8") as f:
+                  data = json.load(f).get("components", [])
+              for c in data:
+                  key = (c.get("component"), c.get("version") or "")
+                  merged[key] = c
+
+          progress = []
+          for comp in base:
+              key = (comp.get("component"), comp.get("version") or "")
+              if key in merged:
+                  progress.append(merged[key])
+
+          with open("artifacts/component_copyrights_progress.json","w",encoding="utf-8") as f:
+              json.dump({"components": progress}, f, indent=2, ensure_ascii=False)
+
+          def esc(s):
+              if s is None: return '""'
+              s = str(s)
+              if re.search(r'[:#\-\[\]\{\},&\*?]|^\s|\s$', s):
+                  return '"' + s.replace('"','\\"') + '"'
+              return s
+
+          yl = ["components:"]
+          for c in progress:
+              name = c.get("component")
+              version = c.get("version")
+              url = c.get("git_url") or ""
+              lic = c.get("license") or ""
+              yl.append(" - component: " + esc(name))
+              if version is not None:
+                  yl.append("   version: " + esc(version))
+              yl.append("   url: " + esc(url))
+              yl.append("   license: " + esc(lic))
+              cps = c.get("copyrights", {}).get("unique_statements", []) or []
+              if cps:
+                  yl.append("   copyrights:")
+                  for s in cps:
+                      yl.append("     - " + esc(s))
+              else:
+                  yl.append("   copyrights: []")
+
+          with open("artifacts/component_attribution_progress.yaml","w",encoding="utf-8") as f:
+              f.write("\n".join(yl) + "\n")
+
+          tl = []
+          for c in progress:
+              name = c.get("component") or ""
+              version = c.get("version")
+              url = c.get("git_url") or ""
+              lic = c.get("license") or ""
+              tl.append(f"Component: {name}")
+              if version: tl.append(f"Version: {version}")
+              tl.append(f"URL: {url}")
+              tl.append(f"License: {lic}")
+              tl.append("Copyrights:")
+              cps = c.get("copyrights", {}).get("unique_statements", []) or []
+              if cps:
+                  for s in cps: tl.append(f"- {s}")
+              else:
+                  tl.append("- (none)")
+              tl.append("")
+          with open("artifacts/component_attribution_progress.txt","w",encoding="utf-8") as f:
+              f.write("\n".join(tl).rstrip() + "\n")
+
+          print("Progress: %d components merged so far." % len(progress))
+          PY
 
       - name: Upload cumulative PROGRESS (JSON)
         uses: actions/upload-artifact@v4
@@ -709,46 +699,43 @@ jobs:
 
       - name: Merge per-part copyrights → final JSON (order preserved)
         shell: bash
-        env:
-          PYCODE: |
-            import json, os, glob
-            os.makedirs("artifacts", exist_ok=True)
-
-            with open("artifacts/components.json","r",encoding="utf-8") as f:
-                all_components = json.load(f).get("components", [])
-
-            merged = {}
-            for fp in sorted(glob.glob("component*_part_*.json")):
-                with open(fp,"r",encoding="utf-8") as f:
-                    data = json.load(f).get("components", [])
-                    for c in data:
-                        key = (c.get("component"), c.get("version") or "")
-                        merged[key] = c
-
-            out = []
-            for comp in all_components:
-                key = (comp.get("component"), comp.get("version") or "")
-                if key in merged:
-                    out.append(merged[key])
-                else:
-                    out.append({
-                        "component": comp.get("component"),
-                        "version": comp.get("version"),
-                        "git_url": comp.get("git_url"),
-                        "license": comp.get("license"),
-                        "status": "scanned-or-missing",
-                        "copyrights":{
-                            "unique_statements": [],
-                            "per_file": []
-                        }
-                    })
-
-            with open("artifacts/component_copyrights.json","w",encoding="utf-8") as f:
-                json.dump({"components": out}, f, indent=2, ensure_ascii=False)
-            print("Merged final copyrights for %d components." % len(out))
         run: |
           set -euo pipefail
-          python -c "$PYCODE"
+          python <<'PY'
+          import json, os, glob
+          os.makedirs("artifacts", exist_ok=True)
+          with open("artifacts/components.json","r",encoding="utf-8") as f:
+              all_components = json.load(f).get("components", [])
+          merged = {}
+          for fp in sorted(glob.glob("component*_part_*.json")):
+              with open(fp,"r",encoding="utf-8") as f:
+                  data = json.load(f).get("components", [])
+              for c in data:
+                  key = (c.get("component"), c.get("version") or "")
+                  merged[key] = c
+
+          out = []
+          for comp in all_components:
+              key = (comp.get("component"), comp.get("version") or "")
+              if key in merged:
+                  out.append(merged[key])
+              else:
+                  out.append({
+                      "component": comp.get("component"),
+                      "version": comp.get("version"),
+                      "git_url": comp.get("git_url"),
+                      "license": comp.get("license"),
+                      "status": "scanned-or-missing",
+                      "copyrights":{
+                          "unique_statements": [],
+                          "per_file": []
+                      }
+                  })
+
+          with open("artifacts/component_copyrights.json","w",encoding="utf-8") as f:
+              json.dump({"components": out}, f, indent=2, ensure_ascii=False)
+          print("Merged final copyrights for %d components." % len(out))
+          PY
 
       - name: Upload final aggregated copyrights (JSON)
         uses: actions/upload-artifact@v4
@@ -760,71 +747,71 @@ jobs:
 
       - name: Build final attribution (YAML + TXT) (order preserved)
         shell: bash
-        env:
-          PYCODE: |
-            import json, os, re
-
-            with open("artifacts/components.json","r",encoding="utf-8") as f:
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          import json, os, re
+          with open("artifacts/components.json","r",encoding="utf-8") as f:
               components = json.load(f).get("components", [])
-            with open("artifacts/component_copyrights.json","r",encoding="utf-8") as f:
+          with open("artifacts/component_copyrights.json","r",encoding="utf-8") as f:
               agg = json.load(f).get("components", [])
+          by_name = {c.get("component"): c for c in agg}
 
-            by_name = {c.get("component"): c for c in agg}
-            def esc(s):
+          def esc(s):
               if s is None: return '""'
-              if re.search(r'[:#\-\[\]{},&*?]|^\s|\s$', s):
-                return '"' + s.replace('"','\\"') + '"'
+              s = str(s)
+              if re.search(r'[:#\-\[\]\{\},&\*?]|^\s|\s$', s):
+                  return '"' + s.replace('"','\\"') + '"'
               return s
 
-            yl = ["components:"]
-            for comp in components:
-              name   = comp.get("component")
+          # YAML
+          yl = ["components:"]
+          for comp in components:
+              name = comp.get("component")
               version= comp.get("version")
-              url    = comp.get("git_url") or ""
-              lic    = comp.get("license") or ""
-              yl.append("  - component: " + esc(name))
+              url = comp.get("git_url") or ""
+              lic = comp.get("license") or ""
+              yl.append(" - component: " + esc(name))
               if version is not None:
-                yl.append("    version: " + esc(version))
-              yl.append("    url: " + esc(url))
-              yl.append("    license: " + esc(lic))
+                  yl.append("   version: " + esc(version))
+              yl.append("   url: " + esc(url))
+              yl.append("   license: " + esc(lic))
               cps = (by_name.get(name, {}) or {}).get("copyrights", {}).get("unique_statements", []) or []
               if cps:
-                yl.append("    copyrights:")
-                for c in cps:
-                  yl.append("      - " + esc(c))
+                  yl.append("   copyrights:")
+                  for c in cps:
+                      yl.append("     - " + esc(c))
               else:
-                yl.append("    copyrights: []")
+                  yl.append("   copyrights: []")
 
-            os.makedirs("artifacts", exist_ok=True)
-            with open("artifacts/component_attribution.yaml","w",encoding="utf-8") as f:
+          os.makedirs("artifacts", exist_ok=True)
+          with open("artifacts/component_attribution.yaml","w",encoding="utf-8") as f:
               f.write("\n".join(yl) + "\n")
 
-            tl = []
-            for comp in components:
-              name    = comp.get("component") or ""
+          # TXT
+          tl = []
+          for comp in components:
+              name = comp.get("component") or ""
               version = comp.get("version")
-              url     = comp.get("git_url") or ""
-              lic     = comp.get("license") or ""
-              tl.append("Component: %s" % name)
-              if version: tl.append("Version: %s" % version)
-              tl.append("URL: %s" % url)
-              tl.append("License: %s" % lic)
+              url = comp.get("git_url") or ""
+              lic = comp.get("license") or ""
+              tl.append(f"Component: {name}")
+              if version: tl.append(f"Version: {version}")
+              tl.append(f"URL: {url}")
+              tl.append(f"License: {lic}")
               tl.append("Copyrights:")
               cps = (by_name.get(name, {}) or {}).get("copyrights", {}).get("unique_statements", []) or []
               if cps:
-                for s in cps:
-                  tl.append("- %s" % s)
+                  for s in cps:
+                      tl.append(f"- {s}")
               else:
-                tl.append("- (none)")
+                  tl.append("- (none)")
               tl.append("")
-
-            with open("artifacts/component_attribution.txt","w",encoding="utf-8") as f:
+          with open("artifacts/component_attribution.txt","w",encoding="utf-8") as f:
               f.write("\n".join(tl).rstrip() + "\n")
 
-            print("Wrote final attribution YAML/TXT (order preserved).")
-        run: |
-          set -euo pipefail
-          python -c "$PYCODE"
+          print("Wrote final attribution YAML/TXT (order preserved).")
+          PY
 
       - name: Upload final attribution (YAML)
         uses: actions/upload-artifact@v4
