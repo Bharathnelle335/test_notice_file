@@ -29,12 +29,14 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install prerequisites
+      - name: Install prerequisites for ScanCode configure
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y git-lfs xz-utils
-          git lfs install
+          # essentials needed by configure and bundled wheels
+          sudo apt-get install -y \
+            python3-venv python3-distutils \
+            xz-utils bzip2 zlib1g libxml2-dev libxslt1-dev
 
       - name: Generate components.json from SBOMs (robust git_url; omit unknown version)
         run: |
@@ -55,20 +57,16 @@ jobs:
               return ("github.com" in u) or ("gitlab.com" in u) or ("bitbucket.org" in u) or u.startswith(("git://", "git@", "ssh://"))
 
           def from_purl_to_git(url: str|None) -> str|None:
-              """Convert a purl-like string (including leading 'pkg:') to https://... .git"""
               if not url: return None
               s = url.strip()
               if s.startswith("pkg:"): s = s[4:]
-              # remove qualifiers and fragments
               s = s.split('#', 1)[0].split('?', 1)[0]
-              # drop @version part
               base = s.rsplit('@', 1)[0]
-              m = re.search(r'^(?:github\\.com|gitlab\\.com|bitbucket\\.org)/([^/]+)/([^/]+)$', base)
+              m = re.search(r'^(github\\.com|gitlab\\.com|bitbucket\\.org)/([^/]+)/([^/]+)$', base)
               if m:
-                  owner, repo = m.groups()
+                  host, owner, repo = m.groups()
                   repo = repo.rstrip('.git')
-                  return f"https://{base.split('/')[0]}/{owner}/{repo}.git"
-              # if it looked like full https://host/owner/repo, pass-through
+                  return f"https://{host}/{owner}/{repo}.git"
               if base.startswith(("http://","https://")) and is_git_host(base):
                   u = base.rstrip("/")
                   if not u.endswith(".git"): u += ".git"
@@ -77,7 +75,6 @@ jobs:
 
           def normalize_git_url(url: str|None) -> str|None:
               if not url: return None
-              # if someone stored a purl string in git_url, convert it
               if url.strip().startswith("pkg:"):
                   converted = from_purl_to_git(url)
                   if converted: return converted
@@ -185,13 +182,11 @@ jobs:
                       out.append({"component": name, "version": version, "git_url": git_url})
               return out
 
-          # Parse, merge, de-duplicate by component+version (git_url may vary)
           comps = parse_cyclonedx(CDX_PATH) + parse_spdx(SPDX_PATH)
           seen, result = set(), []
           for c in comps:
               key = (c["component"], c.get("version") or "")
-              if key in seen: 
-                  # prefer entries with a valid git_url
+              if key in seen:
                   if c.get("git_url"):
                       for r in result:
                           if (r["component"], r.get("version") or "") == key and not r.get("git_url"):
@@ -212,7 +207,8 @@ jobs:
           name: components-json
           path: artifacts/components.json
 
-      - name: Install ScanCode Toolkit (hardcoded v32.4.1 for Python 3.11, Linux)
+      - name: Install ScanCode Toolkit (hardcoded v32.4.1 for Python 3.11, Linux) + configure venv
+        id: install_scancode
         run: |
           set -euo pipefail
           mkdir -p scancode && cd scancode
@@ -225,13 +221,25 @@ jobs:
             echo "Extraction failed: scancode-toolkit-* directory not found." >&2
             exit 1
           fi
-          echo "SCANCODE=$PWD/$SCANCODE_DIR/scancode" >> "$GITHUB_ENV"
+
+          # Use the same Python set up by actions/setup-python
+          PYBIN="$(python -c 'import sys; print(sys.executable)')"
+          echo "Configuring ScanCode with Python at: $PYBIN"
+          (cd "$SCANCODE_DIR" && ./configure --python "$PYBIN")
+
+          # Verify venv scancode exists
+          if [ ! -x "$SCANCODE_DIR/venv/bin/scancode" ]; then
+            echo "ScanCode venv/bin/scancode not found after configure." >&2
+            exit 1
+          fi
+
+          echo "SCANCODE_VENV=$PWD/$SCANCODE_DIR/venv/bin/scancode" >> "$GITHUB_ENV"
           echo "SCANCODE_DIR=$PWD/$SCANCODE_DIR" >> "$GITHUB_ENV"
-          echo "Installed ScanCode at $SCANCODE_DIR"
+          echo "Installed & configured ScanCode at $SCANCODE_DIR"
 
       - name: Clone repos and run ScanCode (copyright + license) with per-component summary
         env:
-          SCANCODE: ${{ env.SCANCODE }}
+          SCANCODE: ${{ env.SCANCODE_VENV }}
         run: |
           set -euo pipefail
           python - << 'PY'
@@ -318,14 +326,15 @@ jobs:
                   with open(out_json, "r", encoding="utf-8") as f:
                       data = json.load(f)
 
-                  # headers → counts/errors if available
+                  # Some archives put counts in headers; otherwise count files array
                   headers = data.get("headers", [])
                   if headers:
                       h0 = headers[0]
                       files_count = h0.get("files_count") or h0.get("resource_count") or 0
                       errors_count = len(h0.get("errors", []) or [])
+                  if not files_count:
+                      files_count = len(data.get("files", []) or [])
 
-                  # Parse per-file entries
                   for fe in data.get("files", []) or []:
                       path = fe.get("path") or fe.get("location") or ""
 
@@ -349,21 +358,19 @@ jobs:
                               "holders": holders
                           })
 
-                      # Licenses: both legacy "licenses" and modern detections/expressions
-                      # 1) direct license entries
+                      # Licenses: legacy "licenses", expressions, and v32 detections
                       for lic in fe.get("licenses", []) or []:
                           key = lic.get("key")
                           if key:
                               unique_license_keys.add(key)
-                      # 2) detected license expression
+
                       expr = fe.get("detected_license_expression") or fe.get("license_expression") or ""
                       if expr:
-                          # split simple AND/OR expressions to preview keys
                           for token in re.split(r'\\s+(AND|OR|WITH)\\s+', expr):
                               token = token.strip()
                               if token and token not in {"AND","OR","WITH"}:
                                   unique_license_keys.add(token)
-                      # 3) modern license_detections (per file)
+
                       for det in fe.get("license_detections", []) or []:
                           k = det.get("license_expression") or det.get("license_expression_spdx") or ""
                           if k:
@@ -371,7 +378,6 @@ jobs:
                                   token = token.strip()
                                   if token and token not in {"AND","OR","WITH"}:
                                       unique_license_keys.add(token)
-                          # keep detection slices
                           per_file_licenses.append({
                               "path": path,
                               "detected_expression": det.get("license_expression") or det.get("license_expression_spdx"),
@@ -438,3 +444,4 @@ jobs:
           name: component-copyrights-licenses
           path: artifacts/component_copyrights.json
           if-no-files-found: error
+          retention-days: 30
