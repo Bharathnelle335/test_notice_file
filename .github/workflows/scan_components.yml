@@ -17,6 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix_json: ${{ steps.set_outputs.outputs.matrix_json }}
+      title: ${{ steps.set_outputs.outputs.title }}
     steps:
       - uses: actions/checkout@v4
       - name: Setup Python
@@ -34,9 +35,12 @@ jobs:
       - name: Set outputs
         id: set_outputs
         run: |
-          echo "matrix_json<<EOF" >> $GITHUB_OUTPUT
-          cat matrix.json >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          {
+            echo "matrix_json<<EOF"
+            cat matrix.json
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+          echo "title=${{ github.event.inputs.notice_title || 'Open Source Notices' }}" >> $GITHUB_OUTPUT
 
   scan:
     needs: prepare
