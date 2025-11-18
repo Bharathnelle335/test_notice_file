@@ -2,9 +2,7 @@ import os
 import json
 import glob
 from spdx_tools.spdx.parser.parse_anything import parse_file as parse_spdx
-
-# Updated import for cyclonedx-python-lib v0.11.1
-from cyclonedx.parser import JsonParser as CycloneDXParser
+from cyclonedx.model.bom import Bom
 
 SBOM_DIR = "./sboms"
 NOTICE_FILE = "NOTICE.md"
@@ -32,8 +30,8 @@ def extract_cyclonedx_components(path):
     comp_list = []
     with open(path) as f:
         json_data = json.load(f)
-    cx = CycloneDXParser(json_data)
-    for comp in cx.bom.components:
+    bom = Bom.from_dict(json_data)
+    for comp in bom.components:
         name = comp.name.split("/")[-1] if comp.name else ""
         url = comp.external_references[0].url if comp.external_references else ""
         license_id = comp.licenses[0].license.id if comp.licenses else ""
