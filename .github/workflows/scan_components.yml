@@ -11,6 +11,10 @@ on:
         description: 'Path to CycloneDX JSON'
         required: true
         default: 'sboms/cyclonedx.json'
+      notice_title:
+        description: 'NOTICE.md title'
+        required: false
+        default: 'Open Source Notices'
 
 jobs:
   prepare:
@@ -34,9 +38,9 @@ jobs:
       - name: Set outputs
         id: set_outputs
         run: |
-          CONTENT=$(cat matrix.json | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
-          echo "::set-output name=matrix_json::$CONTENT"
-          echo "::set-output name=title::${{ github.event.inputs.notice_title || 'Open Source Notices' }}"
+          CONTENT=$(cat matrix.json)
+          echo "matrix_json=$CONTENT" >> $GITHUB_OUTPUT
+          echo "title=${{ github.event.inputs.notice_title || 'Open Source Notices' }}" >> $GITHUB_OUTPUT
 
   scan:
     needs: prepare
@@ -53,7 +57,7 @@ jobs:
       - name: Install ScanCode Toolkit
         run: pip install scancode-toolkit
       - name: Download source and scan component
-        run: python scripts/download_and_scan.py --component "${{ matrix.component }}" --version "${{ matrix.version }}" --purl "${{ matrix.purl }}" --url "${{ matrix.url }}"
+        run: python scripts/download_and_scan.py --component "${{ matrix.component }}" --version "${{ matrix.version }}" --url "${{ matrix.url }}"
       - name: Upload ScanCode result
         uses: actions/upload-artifact@v4
         with:
