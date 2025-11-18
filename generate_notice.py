@@ -1,76 +1,86 @@
 import os
 import json
-import subprocess
-from multiprocessing import Pool
-from pathlib import Path
+import glob
+from spdx_tools.spdx.parser.parse_anything import parse_file as parse_spdx
+from cyclonedx.parser.json import JsonParser as CycloneDXParser
 
-SCANCODE_DIR = "./scancode-toolkit/scancode-toolkit-32.2.0"
-COMPONENTS_FILE = "components.json"  # Save components data from initial step here
-OUTPUT_NOTICE = "NOTICE-with-scancode.md"
+SBOM_DIR = "./sboms"
+NOTICE_FILE = "NOTICE.md"
+COMPONENTS_FILE = "components.json"
 
-def run_scancode_for_url(args):
-    url, index = args
-    # Prepare workspace per component
-    work_dir = Path(f"./scancode_runs/run_{index}")
-    work_dir.mkdir(parents=True, exist_ok=True)
+def extract_spdx_components(path):
+    doc = parse_spdx(path)
+    data = []
+    for pkg in doc.packages:
+        name = pkg.name.split("/")[-1]
+        url = getattr(pkg, "download_location", None) or (pkg.ext_document_refs[0].document_uri if pkg.ext_document_refs else "")
+        copyright_text = getattr(pkg, "copyright_text", "") or ""
+        license_expr = str(getattr(pkg, "license_concluded", "")) or ""
 
-    # Download the source code archive or clone repo to work_dir here
-    # Example: Use `git clone` if url is a git repo (simplified, more robust is recommended)
-    if url.endswith(".git"):
-        subprocess.run(["git", "clone", url, str(work_dir)], check=True)
-    else:
-        # For other URLs, download source archive and extract (dummy example)
-        archive_path = work_dir / "source.zip"
-        subprocess.run(["wget", "-q", "-O", str(archive_path), url], check=True)
-        subprocess.run(["unzip", "-qq", str(archive_path), "-d", str(work_dir)], check=True)
+        data.append({
+            "component": name,
+            "version": getattr(pkg, "version", "") or "",
+            "url": url,
+            "copyright": copyright_text,
+            "license": license_expr,
+        })
+    return data
 
-    # Run ScanCode on the extracted/cloned source
-    output_json = work_dir / "scancode_result.json"
-    scan_cmd = [
-        os.path.join(SCANCODE_DIR, "scancode"),
-        "--copyright",
-        "--license",
-        "--json-pp",
-        str(output_json),
-        str(work_dir),
-    ]
-    subprocess.run(scan_cmd, check=True)
-    
-    # Parse ScanCode output to extract copyrights (simplified)
-    with open(output_json) as f:
-        data = json.load(f)
-    copyrights = []
-    for file_data in data.get("files", []):
-        for cr in file_data.get("copyrights", []):
-            copyrights.append(cr.get("value"))
-    # Consolidate unique copyrights
-    unique_cr = "\n".join(sorted(set(c for c in copyrights if c)))
-    return index, unique_cr
+def extract_cyclonedx_components(path):
+    comp_list = []
+    with open(path) as f:
+        json_data = json.load(f)
+    cx = CycloneDXParser(json_data)
+    for comp in cx.bom.components:
+        name = comp.name.split("/")[-1] if comp.name else ""
+        url = comp.external_references[0].url if comp.external_references else ""
+        license_id = comp.licenses[0].license.id if comp.licenses else ""
+        comp_list.append({
+            "component": name,
+            "version": comp.version or "",
+            "url": url,
+            "copyright": getattr(comp, "copyright", "") or "",
+            "license": license_id,
+        })
+    return comp_list
+
+def unique_license_texts(licenses):
+    # Mockup license texts - replace with real fetch if needed
+    texts = {}
+    for lic in set(licenses):
+        texts[lic] = f"== Begin {lic} License Text ==\n...(license text)...\n== End {lic} =="
+    return texts
 
 def main():
-    # Load initial components list saved during first step (you must save this from generate_notice.py)
-    with open(COMPONENTS_FILE) as f:
-        components = json.load(f)
+    components = []
+    for sbom_file in glob.glob(os.path.join(SBOM_DIR, "*.json")):
+        try:
+            if "spdx" in sbom_file.lower():
+                components.extend(extract_spdx_components(sbom_file))
+            else:
+                components.extend(extract_cyclonedx_components(sbom_file))
+        except Exception as e:
+            print(f"Failed parsing {sbom_file}: {e}")
 
-    # Run parallel ScanCode scans on component URLs
-    urls = [(c["url"], idx) for idx, c in enumerate(components) if c["url"]]
+    # Save components for later ScanCode step
+    with open(COMPONENTS_FILE, "w") as f:
+        json.dump(components, f, indent=2)
 
-    with Pool(min(len(urls), 6)) as pool:  # limit concurrency concurrency
-        results = pool.map(run_scancode_for_url, urls)
+    # Prepare NOTICE.md
+    licenses = [c["license"] for c in components if c["license"]]
+    license_texts = unique_license_texts(licenses)
 
-    # Map index to copyright info
-    idx_copyright = {idx: cr for idx, cr in results}
+    with open(NOTICE_FILE, "w") as f:
+        f.write("# Combined NOTICE\n\n")
+        f.write("| Component | Version | URL | Copyright | License |\n")
+        f.write("|-----------|---------|-----|-----------|---------|\n")
+        for c in components:
+            f.write(f"| {c['component']} | {c['version']} | {c['url']} | {c['copyright']} | {c['license']} |\n")
+        f.write("\n# License Texts\n\n")
+        for lic, txt in license_texts.items():
+            f.write(f"## {lic}\n{txt}\n\n")
 
-    # Generate updated NOTICE with ScanCode copyrights
-    with open(OUTPUT_NOTICE, "w") as f:
-        f.write("# NOTICE with ScanCode Copyrights\n\n")
-        f.write("| Component | Version | URL | Copyright (ScanCode) | License |\n")
-        f.write("|-----------|---------|-----|---------------------|---------|\n")
-        for idx, c in enumerate(components):
-            scancode_cr = idx_copyright.get(idx, c.get("copyright", ""))
-            f.write(f"| {c['component']} | {c['version']} | {c['url']} | {scancode_cr} | {c['license']} |\n")
-
-    print(f"Updated NOTICE file generated with ScanCode copyrights: {OUTPUT_NOTICE}")
+    print(f"NOTICE.md generated with {len(components)} components.")
 
 if __name__ == "__main__":
     main()
