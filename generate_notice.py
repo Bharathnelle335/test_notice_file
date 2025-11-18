@@ -3,7 +3,7 @@ import json
 import glob
 from spdx_tools.spdx.parser.parse_anything import parse_file as parse_spdx
 
-# Updated import for cyclonedx-python-lib (version 0.11.1)
+# Updated import for cyclonedx-python-lib v0.11.1
 from cyclonedx.parser import JsonParser as CycloneDXParser
 
 SBOM_DIR = "./sboms"
