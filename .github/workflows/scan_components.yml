@@ -28,19 +28,15 @@ jobs:
         run: pip install spdx-tools cyclonedx-python-lib requests
       - name: Extract components and create matrix.json
         id: extract_components
-        run: |
-          python scripts/extract_components.py --spdx ${{ github.event.inputs.spdx_json }} --cdx ${{ github.event.inputs.cyclonedx_json }}
+        run: python scripts/extract_components.py --spdx ${{ github.event.inputs.spdx_json }} --cdx ${{ github.event.inputs.cyclonedx_json }}
       - name: Show matrix.json content (debug)
         run: cat matrix.json
       - name: Set outputs
         id: set_outputs
         run: |
-          {
-            echo "matrix_json<<EOF"
-            cat matrix.json
-            echo "EOF"
-          } >> $GITHUB_OUTPUT
-          echo "title=${{ github.event.inputs.notice_title || 'Open Source Notices' }}" >> $GITHUB_OUTPUT
+          CONTENT=$(cat matrix.json | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+          echo "::set-output name=matrix_json::$CONTENT"
+          echo "::set-output name=title::${{ github.event.inputs.notice_title || 'Open Source Notices' }}"
 
   scan:
     needs: prepare
