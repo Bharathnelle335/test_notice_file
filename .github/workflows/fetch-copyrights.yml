@@ -72,7 +72,7 @@ jobs:
                   base, version = s.rsplit('@', 1)
               component = urllib.parse.unquote(base.split('/')[-1])
               git_url = None
-              m = re.search(r'(github\.com|gitlab\.com|bitbucket\.org)/([^/?#]+)/([^/?#]+)', base)
+              m = re.search(r'(github\\.com|gitlab\\.com|bitbucket\\.org)/([^/?#]+)/([^/?#]+)', base)
               if m:
                   host, owner, repo = m.groups()
                   repo = repo.rstrip('.git')
@@ -137,17 +137,14 @@ jobs:
           name: components-json
           path: artifacts/components.json
 
-      - name: Install ScanCode Toolkit (hardcoded v32.0.0)
+      - name: Install ScanCode Toolkit (hardcoded v32.4.1 for Python 3.11, Linux)
         run: |
           set -euo pipefail
           mkdir -p scancode && cd scancode
-
-          # Hardcoded stable release tarball for Linux x86_64
-          ASSET_URL="https://github.com/nexB/scancode-toolkit/releases/download/v32.0.0/scancode-toolkit-32.0.0.linux-x86_64.tar.xz"
+          ASSET_URL="https://github.com/aboutcode-org/scancode-toolkit/releases/download/v32.4.1/scancode-toolkit-v32.4.1_py3.11-linux.tar.gz"
           echo "Downloading: $ASSET_URL"
-          curl -fsSL "$ASSET_URL" -o scancode.tar.xz
-          tar -xf scancode.tar.xz
-
+          curl -fsSL "$ASSET_URL" -o scancode.tar.gz
+          tar -xzf scancode.tar.gz
           SCANCODE_DIR=$(ls -d scancode-toolkit-* | head -n 1)
           if [ -z "${SCANCODE_DIR:-}" ]; then
             echo "Extraction failed: scancode-toolkit-* directory not found." >&2
@@ -187,22 +184,18 @@ jobs:
                   continue
 
               if not git_url:
-                  # No repo URL available; emit empty copyrights
                   results.append({"component": name, "version": version, "git_url": git_url, "copyrights": []})
                   continue
 
               dest = os.path.join("repos", sanitize(name) + (f"-{sanitize(version)}" if version else ""))
               if not os.path.exists(dest):
                   if version:
-                      # If version exists → checkout that tag/branch (no heuristics)
                       p = run(f"git clone --depth 1 --branch {shlex.quote(version)} {shlex.quote(git_url)} {shlex.quote(dest)}")
                       if p.returncode != 0:
                           print(p.stdout)
-                          # If clone fails (wrong tag), skip scanning for this component
                           results.append({"component": name, "version": version, "git_url": git_url, "copyrights": []})
                           continue
                   else:
-                      # No version → clone default branch (stable main/master)
                       p = run(f"git clone --depth 1 {shlex.quote(git_url)} {shlex.quote(dest)}")
                       if p.returncode != 0:
                           print(p.stdout)
