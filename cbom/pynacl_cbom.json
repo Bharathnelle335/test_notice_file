@@ -1,0 +1,1494 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "serialNumber": "urn:uuid:d3f66e83-9ded-4510-9578-d88fb3cd7081",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-07-14T18:13:37Z",
+    "tools": {
+      "components": [
+        {
+          "type": "application",
+          "group": "SCANOSS",
+          "name": "crypto-finder",
+          "version": "dev"
+        }
+      ]
+    }
+  },
+  "components": [
+    {
+      "bom-ref": "5ac363be-cc1e-417c-9610-228fc715f86a",
+      "type": "cryptographic-asset",
+      "name": "Argon2i",
+      "properties": [
+        {
+          "name": "scanoss:cryptoFunction",
+          "value": "keyderive"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "name",
+            "confidence": 1,
+            "methods": [
+              {
+                "technique": "source-code-analysis",
+                "confidence": 1,
+                "value": "scanoss:ruleid,C.msys64.tmp.run-3725971275.Users.smili..scanoss.crypto-finder.cache.rulesets.dca.latest.semgrep-rules.python.pynacl.algorithm.kdf.argon2.python.pynacl.algorithm.kdf.argon2.pwhash-argon2i-str"
+              }
+            ]
+          },
+          {
+            "field": "name",
+            "confidence": 1,
+            "methods": [
+              {
+                "technique": "source-code-analysis",
+                "confidence": 1,
+                "value": "scanoss:ruleid,C.msys64.tmp.run-3725971275.Users.smili..scanoss.crypto-finder.cache.rulesets.dca.latest.semgrep-rules.python.pynacl.algorithm.kdf.argon2.python.pynacl.algorithm.kdf.argon2.pwhash-argon2i"
+              }
+            ]
+          }
+        ],
+        "occurrences": [
+          {
+            "location": "tests\\test_pwhash.py",
+            "line": 454,
+            "additionalContext": "scanoss:match,pw_hash = nacl.pwhash.argon2i.str(_psw, opslimit=ops, memlimit=mem)"
+          },
+          {
+            "location": "tests\\test_pwhash.py",
+            "line": 480,
+            "additionalContext": "scanoss:match,pw_hash = nacl.pwhash.argon2i.str(_psw, opslimit=ops, memlimit=mem)"
+          },
+          {
+            "location": "tests\\test_pwhash.py",
+            "line": 490,
+            "additionalContext": "scanoss:match,a2i_hash = nacl.pwhash.argon2i.str( _psw, opslimit=nacl.pwhash.argon2i.OPSLIMIT_INTERACTIVE, memlimit=nacl.pwhash.argon2i.MEMLIMIT_INTERACTIVE, )"
+          },
+          {
+            "location": "tests\\test_pwhash.py",
+            "line": 550,
+            "additionalContext": "scanoss:match,dk = nacl.pwhash.argon2i.kdf( dk_size, password.encode(\"utf-8\"), salt.encode(\"utf-8\"), iters, 1024 * mem_kb, )"
+          },
+          {
+            "location": "tests\\test_pwhash.py",
+            "line": 612,
+            "additionalContext": "scanoss:match,nacl.pwhash.argon2i.kdf( dk_size, password.encode(\"utf-8\"), salt.encode(\"utf-8\"), iters, 1024 * mem_kb, )"
+          }
+        ]
+      },
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": {
+          "primitive": "kdf",
+          "executionEnvironment": "software-plain-ram",
+          "implementationPlatform": "x86_64",
+          "cryptoFunctions": [
+            "keyderive"
+          ]
+        }
+      }
+    },
+    {
+      "bom-ref": "39223467-a56d-41da-a04c-70f9ca7ae13d",
+      "type": "cryptographic-asset",
+      "name": "Argon2id",
+      "properties": [
+        {
+          "name": "scanoss:cryptoFunction",
+          "value": "keyderive"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "name",
+            "confidence": 1,
+            "methods": [
+              {
+                "technique": "source-code-analysis",
+                "confidence": 1,
+                "value": "scanoss:ruleid,C.msys64.tmp.run-3725971275.Users.smili..scanoss.crypto-finder.cache.rulesets.dca.latest.semgrep-rules.python.pynacl.algorithm.kdf.argon2.python.pynacl.algorithm.kdf.argon2.pwhash-argon2id"
+              }
+            ]
+          }
+        ],
+        "occurrences": [
+          {
+            "location": "tests\\test_pwhash.py",
+            "line": 573,
+            "additionalContext": "scanoss:match,dk = nacl.pwhash.argon2id.kdf( dk_size, password.encode(\"utf-8\"), salt.encode(\"utf-8\"), iters, 1024 * mem_kb, )"
+          },
+          {
+            "location": "tests\\test_pwhash.py",
+            "line": 633,
+            "additionalContext": "scanoss:match,nacl.pwhash.argon2id.kdf( dk_size, password.encode(\"utf-8\"), salt.encode(\"utf-8\"), iters, 1024 * mem_kb, )"
+          }
+        ]
+      },
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": {
+          "primitive": "kdf",
+          "executionEnvironment": "software-plain-ram",
+          "implementationPlatform": "x86_64",
+          "cryptoFunctions": [
+            "keyderive"
+          ]
+        }
+      }
+    },
+    {
+      "bom-ref": "8db2ac74-6353-4eae-a508-cf76a0ac95d8",
+      "type": "cryptographic-asset",
+      "name": "BLAKE2b",
+      "properties": [
+        {
+          "name": "scanoss:cryptoFunction",
+          "value": "digest"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "name",
+            "confidence": 1,
+            "methods": [
+              {
+                "technique": "source-code-analysis",
+                "confidence": 1,
+                "value": "scanoss:ruleid,C.msys64.tmp.run-3725971275.Users.smili..scanoss.crypto-finder.cache.rulesets.dca.latest.semgrep-rules.c.nettle.algorithm.hash.blake2.c.nettle.algorithm.hash.blake2"
+              }
+            ]
+          },
+          {
+            "field": "name",
+            "confidence": 1,
+            "methods": [
+              {
+                "technique": "source-code-analysis",
+                "confidence": 1,
+                "value": "scanoss:ruleid,C.msys64.tmp.run-3725971275.Users.smili..scanoss.crypto-finder.cache.rulesets.dca.latest.semgrep-rules.c.nettle.algorithm.hash.blake2.c.nettle.algorithm.hash.blake2"
+              }
+            ]
+          },
+          {
+            "field": "name",
+            "confidence": 1,
+            "methods": [
+              {
+                "technique": "source-code-analysis",
+                "confidence": 1,
+                "value": "scanoss:ruleid,C.msys64.tmp.run-3725971275.Users.smili..scanoss.crypto-finder.cache.rulesets.dca.latest.semgrep-rules.python.pynacl.algorithm.hash.blake2.python.pynacl.algorithm.hash.blake2.blake2b"
+              }
+            ]
+          }
+        ],
+        "occurrences": [
+          {
+            "location": "src\\libsodium\\src\\libsodium\\crypto_generichash\\blake2b\\ref\\blake2b-ref.c",
+            "line": 209,
+            "additionalContext": "scanoss:match,blake2b_update(S, block, BLAKE2B_BLOCKBYTES);"
+          },
+          {
+            "location": "src\\libsodium\\src\\libsodium\\crypto_generichash\\blake2b\\ref\\blake2b-ref.c",
+            "line": 255,
+            "additionalContext": "scanoss:match,blake2b_update(S, block, BLAKE2B_BLOCKBYTES);"
+          },
+          {
+            "location": "src\\libsodium\\src\\libsodium\\crypto_generichash\\blake2b\\ref\\blake2b-ref.c",
+            "line": 361,
+            "additionalContext": "scanoss:match,if (blake2b_init(S, outlen) \u003c 0) {"
+          },
+          {
+            "location": "src\\libsodium\\src\\libsodium\\crypto_generichash\\blake2b\\ref\\blake2b-ref.c",
+            "line": 366,
+            "additionalContext": "scanoss:match,blake2b_update(S, (const uint8_t *) in, inlen);"
+          },
+          {
+            "location": "src\\libsodium\\src\\libsodium\\crypto_generichash\\blake2b\\ref\\blake2b-ref.c",
+            "line": 405,
+            "additionalContext": "scanoss:match,blake2b_update(S, (const uint8_t *) in, inlen);"
+          },
+          {
+            "location": "src\\libsodium\\src\\libsodium\\crypto_generichash\\blake2b\\ref\\generichash_blake2b.c",
+            "line": 58,
+            "additionalContext": "scanoss:match,if (blake2b_init((blake2b_state *) (void *) state, (uint8_t) outlen) != 0) {"
+          },
+          {
+            "location": "src\\libsodium\\src\\libsodium\\crypto_generichash\\blake2b\\ref\\generichash_blake2b.c",
+            "line": 99,
+            "additionalContext": "scanoss:match,return blake2b_update((blake2b_state *) (void *) state,"
+          },
+          {
+            "location": "tests\\test_generichash.py",
+            "line": 97,
+            "additionalContext": "scanoss:match,nacl.hash.blake2b( message, digest_size=outlen, key=key, salt=salt, person=person )"
+          },
+          {
+            "location": "tests\\test_generichash.py",
+            "line": 129,
+            "additionalContext": "scanoss:match,out = nacl.hash.blake2b( msg, digest_size=outlen_parsed, key=k, salt=slt, person=pers )"
+          }
+        ]
+      },
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": {
+          "primitive": "hash",
+          "executionEnvironment": "software-plain-ram",
+          "implementationPlatform": "x86_64",
+          "cryptoFunctions": [
+            "digest"
+          ]
+        }
+      }
+    },
+    {
+      "bom-ref": "d5c2cadd-c999-4f50-979f-8bece6f25c4d",
+      "type": "cryptographic-asset",
+      "name": "ECDSA",
+      "properties": [
+        {
+          "name": "scanoss:cryptoFunction",
+          "value": "keygen,sign"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "name",
+            "confidence": 1,
+            "methods": [
+              {
+                "technique": "source-code-analysis",
+                "confidence": 1,
+                "value": "scanoss:ruleid,C.msys64.tmp.run-3725971275.Users.smili..scanoss.crypto-finder.cache.rulesets.dca.latest.semgrep-rules.python.ecdsa.algorithm.signature.ecdsa.python.ecdsa.algorithm.signature.ecdsa.keygen-default-curve"
+              }
+            ]
+          },
+          {
+            "field": "name",
+            "confidence": 1,
+            "methods": [
+              {
+                "technique": "source-code-analysis",
+                "confidence": 1,
+                "value": "scanoss:ruleid,C.msys64.tmp.run-3725971275.Users.smili..scanoss.crypto-finder.cache.rulesets.dca.latest.semgrep-rules.python.ecdsa.algorithm.signature.ecdsa.python.ecdsa.algorithm.signature.ecdsa.sign"
+              }
+            ]
+          }
+        ],
+        "occurrences": [
+          {
+            "location": "tests\\test_signing.py",
+            "line": 56,
+            "additionalContext": "scanoss:match,SigningKey.generate()"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 189,
+            "additionalContext": "scanoss:match,skey = SigningKey.generate()"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 190,
+            "additionalContext": "scanoss:match,smessage = skey.sign(b\"A Test Message!\")"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 204,
+            "additionalContext": "scanoss:match,skey = SigningKey.generate()"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 206,
+            "additionalContext": "scanoss:match,signature = skey.sign(message).signature"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 222,
+            "additionalContext": "scanoss:match,sk = SigningKey.generate()"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 225,
+            "additionalContext": "scanoss:match,smsg = sk.sign(b\"Hello World in base64\", encoder=Base64Encoder)"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 239,
+            "additionalContext": "scanoss:match,sk = SigningKey.generate()"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 242,
+            "additionalContext": "scanoss:match,smsg = sk.sign(b\"Hello World in hex\", encoder=HexEncoder)"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 275,
+            "additionalContext": "scanoss:match,sk = SigningKey.generate()"
+          }
+        ]
+      },
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": {
+          "primitive": "signature",
+          "parameterSetIdentifier": "NIST192p",
+          "executionEnvironment": "software-plain-ram",
+          "implementationPlatform": "x86_64",
+          "cryptoFunctions": [
+            "keygen",
+            "sign"
+          ]
+        },
+        "oid": "1.2.840.10045.2.1"
+      }
+    },
+    {
+      "bom-ref": "4e66bebf-a159-4246-802a-93c7fab7cd36",
+      "type": "cryptographic-asset",
+      "name": "Ed25519",
+      "properties": [
+        {
+          "name": "scanoss:cryptoFunction",
+          "value": "keygen,verify"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "name",
+            "confidence": 1,
+            "methods": [
+              {
+                "technique": "source-code-analysis",
+                "confidence": 1,
+                "value": "scanoss:ruleid,C.msys64.tmp.run-3725971275.Users.smili..scanoss.crypto-finder.cache.rulesets.dca.latest.semgrep-rules.python.pynacl.algorithm.signature.eddsa.python.pynacl.algorithm.signature.eddsa.signing-key-generate"
+              }
+            ]
+          },
+          {
+            "field": "name",
+            "confidence": 1,
+            "methods": [
+              {
+                "technique": "source-code-analysis",
+                "confidence": 1,
+                "value": "scanoss:ruleid,C.msys64.tmp.run-3725971275.Users.smili..scanoss.crypto-finder.cache.rulesets.dca.latest.semgrep-rules.python.pynacl.algorithm.signature.eddsa.python.pynacl.algorithm.signature.eddsa.signing-key-ctor"
+              }
+            ]
+          },
+          {
+            "field": "name",
+            "confidence": 1,
+            "methods": [
+              {
+                "technique": "source-code-analysis",
+                "confidence": 1,
+                "value": "scanoss:ruleid,C.msys64.tmp.run-3725971275.Users.smili..scanoss.crypto-finder.cache.rulesets.dca.latest.semgrep-rules.python.pynacl.algorithm.signature.eddsa.python.pynacl.algorithm.signature.eddsa.verify-key"
+              }
+            ]
+          }
+        ],
+        "occurrences": [
+          {
+            "location": "tests\\test_signing.py",
+            "line": 56,
+            "additionalContext": "scanoss:match,SigningKey.generate()"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 60,
+            "additionalContext": "scanoss:match,SigningKey(b\"\")"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 63,
+            "additionalContext": "scanoss:match,k = SigningKey(b\"\\x00\" * crypto_sign_SEEDBYTES)"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 67,
+            "additionalContext": "scanoss:match,k1 = SigningKey(b\"\\x00\" * crypto_sign_SEEDBYTES)"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 68,
+            "additionalContext": "scanoss:match,k2 = SigningKey(b\"\\x00\" * crypto_sign_SEEDBYTES)"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 73,
+            "additionalContext": "scanoss:match,k1 = SigningKey(b\"\\x00\" * crypto_sign_SEEDBYTES)"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 74,
+            "additionalContext": "scanoss:match,k2 = SigningKey(b\"\\x00\" * crypto_sign_SEEDBYTES)"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 82,
+            "additionalContext": "scanoss:match,SigningKey(b\"\\x01\" * crypto_sign_SEEDBYTES),"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 83,
+            "additionalContext": "scanoss:match,SigningKey(b\"\\x00\" * (crypto_sign_SEEDBYTES - 1) + b\"\\x01\"),"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 87,
+            "additionalContext": "scanoss:match,k1 = SigningKey(b\"\\x00\" * crypto_sign_SEEDBYTES)"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 95,
+            "additionalContext": "scanoss:match,SigningKey(seed, encoder=HexEncoder)"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 109,
+            "additionalContext": "scanoss:match,signing_key = SigningKey( seed, encoder=HexEncoder, )"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 126,
+            "additionalContext": "scanoss:match,VerifyKey(b\"\")"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 129,
+            "additionalContext": "scanoss:match,k = VerifyKey(b\"\\x00\" * crypto_sign_PUBLICKEYBYTES)"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 133,
+            "additionalContext": "scanoss:match,k1 = VerifyKey(b\"\\x00\" * crypto_sign_PUBLICKEYBYTES)"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 134,
+            "additionalContext": "scanoss:match,k2 = VerifyKey(b\"\\x00\" * crypto_sign_PUBLICKEYBYTES)"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 139,
+            "additionalContext": "scanoss:match,k1 = VerifyKey(b\"\\x00\" * crypto_sign_PUBLICKEYBYTES)"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 140,
+            "additionalContext": "scanoss:match,k2 = VerifyKey(b\"\\x00\" * crypto_sign_PUBLICKEYBYTES)"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 148,
+            "additionalContext": "scanoss:match,VerifyKey(b\"\\x01\" * crypto_sign_PUBLICKEYBYTES),"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 149,
+            "additionalContext": "scanoss:match,VerifyKey(b\"\\x00\" * (crypto_sign_PUBLICKEYBYTES - 1) + b\"\\x01\"),"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 153,
+            "additionalContext": "scanoss:match,k1 = VerifyKey(b\"\\x00\" * crypto_sign_PUBLICKEYBYTES)"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 168,
+            "additionalContext": "scanoss:match,key = VerifyKey( public_key, encoder=HexEncoder, )"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 189,
+            "additionalContext": "scanoss:match,skey = SigningKey.generate()"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 204,
+            "additionalContext": "scanoss:match,skey = SigningKey.generate()"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 222,
+            "additionalContext": "scanoss:match,sk = SigningKey.generate()"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 239,
+            "additionalContext": "scanoss:match,sk = SigningKey.generate()"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 259,
+            "additionalContext": "scanoss:match,signing_key = SigningKey(binascii.unhexlify(keypair_seed))"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 275,
+            "additionalContext": "scanoss:match,sk = SigningKey.generate()"
+          }
+        ]
+      },
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": {
+          "primitive": "signature",
+          "parameterSetIdentifier": "256",
+          "executionEnvironment": "software-plain-ram",
+          "implementationPlatform": "x86_64",
+          "cryptoFunctions": [
+            "keygen",
+            "verify"
+          ]
+        },
+        "oid": "1.3.101.112"
+      }
+    },
+    {
+      "bom-ref": "195ba1f1-d774-4b6d-83a2-8825ee1f8c34",
+      "type": "cryptographic-asset",
+      "name": "Poly1305",
+      "properties": [
+        {
+          "name": "scanoss:cryptoFunction",
+          "value": "tag"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "name",
+            "confidence": 1,
+            "methods": [
+              {
+                "technique": "source-code-analysis",
+                "confidence": 1,
+                "value": "scanoss:ruleid,C.msys64.tmp.run-3725971275.Users.smili..scanoss.crypto-finder.cache.rulesets.dca.latest.semgrep-rules.c.nettle.algorithm.mac.poly1305.c.nettle.algorithm.mac.poly1305"
+              }
+            ]
+          }
+        ],
+        "occurrences": [
+          {
+            "location": "src\\libsodium\\src\\libsodium\\crypto_onetimeauth\\poly1305\\donna\\poly1305_donna.c",
+            "line": 66,
+            "additionalContext": "scanoss:match,poly1305_update(\u0026state, m, inlen);"
+          },
+          {
+            "location": "src\\libsodium\\src\\libsodium\\crypto_onetimeauth\\poly1305\\donna\\poly1305_donna.c",
+            "line": 88,
+            "additionalContext": "scanoss:match,poly1305_update((poly1305_state_internal_t *) (void *) state, in, inlen);"
+          }
+        ]
+      },
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": {
+          "primitive": "mac",
+          "executionEnvironment": "software-plain-ram",
+          "implementationPlatform": "x86_64",
+          "cryptoFunctions": [
+            "tag"
+          ]
+        }
+      }
+    },
+    {
+      "bom-ref": "f772e3d1-a578-4ace-9946-69b65c9b8fa7",
+      "type": "cryptographic-asset",
+      "name": "SHA-2",
+      "properties": [
+        {
+          "name": "scanoss:cryptoFunction",
+          "value": "digest"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "name",
+            "confidence": 1,
+            "methods": [
+              {
+                "technique": "source-code-analysis",
+                "confidence": 1,
+                "value": "scanoss:ruleid,C.msys64.tmp.run-3725971275.Users.smili..scanoss.crypto-finder.cache.rulesets.dca.latest.semgrep-rules.python.hashlib.algorithm.hash.sha-2.python.hashlib.algorithm.hash.sha-2"
+              }
+            ]
+          }
+        ],
+        "occurrences": [
+          {
+            "location": "tests\\test_bindings.py",
+            "line": 47,
+            "additionalContext": "scanoss:match,assert tohex(h1) == hashlib.sha512(msg).hexdigest()"
+          },
+          {
+            "location": "tests\\test_bindings.py",
+            "line": 58,
+            "additionalContext": "scanoss:match,assert tohex(h3) == hashlib.sha256(msg).hexdigest()"
+          }
+        ]
+      },
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": {
+          "primitive": "hash",
+          "executionEnvironment": "software-plain-ram",
+          "implementationPlatform": "x86_64",
+          "cryptoFunctions": [
+            "digest"
+          ]
+        },
+        "oid": "2.16.840.1.101.3.4.2"
+      }
+    },
+    {
+      "bom-ref": "704c0fd1-8eff-4558-81de-2cbce358d6fa",
+      "type": "cryptographic-asset",
+      "name": "SHA-256",
+      "properties": [
+        {
+          "name": "scanoss:cryptoFunction",
+          "value": "digest"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "name",
+            "confidence": 1,
+            "methods": [
+              {
+                "technique": "source-code-analysis",
+                "confidence": 1,
+                "value": "scanoss:ruleid,C.msys64.tmp.run-3725971275.Users.smili..scanoss.crypto-finder.cache.rulesets.dca.latest.semgrep-rules.python.pynacl.algorithm.hash.blake2.python.pynacl.algorithm.hash.sha2.sha256"
+              }
+            ]
+          }
+        ],
+        "occurrences": [
+          {
+            "location": "tests\\test_hash.py",
+            "line": 34,
+            "additionalContext": "scanoss:match,assert nacl.hash.sha256(inp) == expected"
+          },
+          {
+            "location": "tests\\test_hash.py",
+            "line": 57,
+            "additionalContext": "scanoss:match,assert nacl.hash.sha256(inp, encoder=nacl.encoding.RawEncoder) == expected"
+          }
+        ]
+      },
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": {
+          "primitive": "hash",
+          "parameterSetIdentifier": "256",
+          "executionEnvironment": "software-plain-ram",
+          "implementationPlatform": "x86_64",
+          "cryptoFunctions": [
+            "digest"
+          ]
+        },
+        "oid": "2.16.840.1.101.3.4.2.1"
+      }
+    },
+    {
+      "bom-ref": "1d42cc87-6072-4203-8e5d-777f17c1cb3b",
+      "type": "cryptographic-asset",
+      "name": "SHA-512",
+      "properties": [
+        {
+          "name": "scanoss:cryptoFunction",
+          "value": "digest"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "name",
+            "confidence": 1,
+            "methods": [
+              {
+                "technique": "source-code-analysis",
+                "confidence": 1,
+                "value": "scanoss:ruleid,C.msys64.tmp.run-3725971275.Users.smili..scanoss.crypto-finder.cache.rulesets.dca.latest.semgrep-rules.python.pynacl.algorithm.hash.blake2.python.pynacl.algorithm.hash.sha2.sha512"
+              }
+            ]
+          }
+        ],
+        "occurrences": [
+          {
+            "location": "tests\\test_hash.py",
+            "line": 80,
+            "additionalContext": "scanoss:match,assert nacl.hash.sha512(inp) == expected"
+          },
+          {
+            "location": "tests\\test_hash.py",
+            "line": 106,
+            "additionalContext": "scanoss:match,assert nacl.hash.sha512(inp, encoder=nacl.encoding.RawEncoder) == expected"
+          }
+        ]
+      },
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": {
+          "primitive": "hash",
+          "parameterSetIdentifier": "512",
+          "executionEnvironment": "software-plain-ram",
+          "implementationPlatform": "x86_64",
+          "cryptoFunctions": [
+            "digest"
+          ]
+        },
+        "oid": "2.16.840.1.101.3.4.2.3"
+      }
+    },
+    {
+      "bom-ref": "f3f6ff44-6b2f-4771-9904-e7bd7ddca5ed",
+      "type": "cryptographic-asset",
+      "name": "SipHash-2-4",
+      "properties": [
+        {
+          "name": "scanoss:cryptoFunction",
+          "value": "mac"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "name",
+            "confidence": 1,
+            "methods": [
+              {
+                "technique": "source-code-analysis",
+                "confidence": 1,
+                "value": "scanoss:ruleid,C.msys64.tmp.run-3725971275.Users.smili..scanoss.crypto-finder.cache.rulesets.dca.latest.semgrep-rules.python.pynacl.algorithm.hash.blake2.python.pynacl.algorithm.mac.siphash.siphash24"
+              }
+            ]
+          }
+        ],
+        "occurrences": [
+          {
+            "location": "tests\\test_shorthash.py",
+            "line": 197,
+            "additionalContext": "scanoss:match,rs = siphash24(inp, key)"
+          },
+          {
+            "location": "tests\\test_shorthash.py",
+            "line": 216,
+            "additionalContext": "scanoss:match,siphash24(inp, key)"
+          }
+        ]
+      },
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": {
+          "primitive": "mac",
+          "executionEnvironment": "software-plain-ram",
+          "implementationPlatform": "x86_64",
+          "cryptoFunctions": [
+            "other"
+          ]
+        }
+      }
+    },
+    {
+      "bom-ref": "0523e6bf-68d0-4671-95fa-24129eb814be",
+      "type": "cryptographic-asset",
+      "name": "SipHashX-2-4",
+      "properties": [
+        {
+          "name": "scanoss:cryptoFunction",
+          "value": "mac"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "name",
+            "confidence": 1,
+            "methods": [
+              {
+                "technique": "source-code-analysis",
+                "confidence": 1,
+                "value": "scanoss:ruleid,C.msys64.tmp.run-3725971275.Users.smili..scanoss.crypto-finder.cache.rulesets.dca.latest.semgrep-rules.python.pynacl.algorithm.hash.blake2.python.pynacl.algorithm.mac.siphash.siphashx24"
+              }
+            ]
+          }
+        ],
+        "occurrences": [
+          {
+            "location": "tests\\test_shorthash.py",
+            "line": 206,
+            "additionalContext": "scanoss:match,rs = siphashx24(inp, key)"
+          },
+          {
+            "location": "tests\\test_shorthash.py",
+            "line": 228,
+            "additionalContext": "scanoss:match,siphashx24(inp, key)"
+          },
+          {
+            "location": "tests\\test_shorthash.py",
+            "line": 236,
+            "additionalContext": "scanoss:match,siphashx24(b\"\", b\"\")"
+          }
+        ]
+      },
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": {
+          "primitive": "mac",
+          "executionEnvironment": "software-plain-ram",
+          "implementationPlatform": "x86_64",
+          "cryptoFunctions": [
+            "other"
+          ]
+        }
+      }
+    },
+    {
+      "bom-ref": "dd380f19-6a63-4f3a-a4b6-1c0d3fa482a7",
+      "type": "cryptographic-asset",
+      "name": "X25519",
+      "evidence": {
+        "identity": [
+          {
+            "field": "name",
+            "confidence": 1,
+            "methods": [
+              {
+                "technique": "source-code-analysis",
+                "confidence": 1,
+                "value": "scanoss:ruleid,C.msys64.tmp.run-3725971275.Users.smili..scanoss.crypto-finder.cache.rulesets.dca.latest.semgrep-rules.c.openiked.algorithm.key-agree.x25519.c.openiked.algorithm.key-agree.x25519"
+              }
+            ]
+          },
+          {
+            "field": "name",
+            "confidence": 1,
+            "methods": [
+              {
+                "technique": "source-code-analysis",
+                "confidence": 1,
+                "value": "scanoss:ruleid,C.msys64.tmp.run-3725971275.Users.smili..scanoss.crypto-finder.cache.rulesets.dca.latest.semgrep-rules.python.pynacl.algorithm.key-agree.x25519.python.pynacl.algorithm.key-agree.x25519.private-key-ctor"
+              }
+            ]
+          },
+          {
+            "field": "name",
+            "confidence": 1,
+            "methods": [
+              {
+                "technique": "source-code-analysis",
+                "confidence": 1,
+                "value": "scanoss:ruleid,C.msys64.tmp.run-3725971275.Users.smili..scanoss.crypto-finder.cache.rulesets.dca.latest.semgrep-rules.python.pynacl.algorithm.key-agree.x25519.python.pynacl.algorithm.key-agree.x25519.private-key-generate"
+              }
+            ]
+          },
+          {
+            "field": "name",
+            "confidence": 1,
+            "methods": [
+              {
+                "technique": "source-code-analysis",
+                "confidence": 1,
+                "value": "scanoss:ruleid,C.msys64.tmp.run-3725971275.Users.smili..scanoss.crypto-finder.cache.rulesets.dca.latest.semgrep-rules.python.pynacl.algorithm.key-agree.x25519.python.pynacl.algorithm.key-agree.x25519.box"
+              }
+            ]
+          }
+        ],
+        "occurrences": [
+          {
+            "location": "src\\libsodium\\src\\libsodium\\crypto_box\\curve25519xchacha20poly1305\\box_curve25519xchacha20poly1305.c",
+            "line": 48,
+            "additionalContext": "scanoss:match,if (crypto_scalarmult_curve25519(s, sk, pk) != 0) {"
+          },
+          {
+            "location": "src\\libsodium\\src\\libsodium\\crypto_box\\curve25519xsalsa20poly1305\\box_curve25519xsalsa20poly1305.c",
+            "line": 42,
+            "additionalContext": "scanoss:match,if (crypto_scalarmult_curve25519(s, sk, pk) != 0) {"
+          },
+          {
+            "location": "src\\libsodium\\src\\libsodium\\crypto_scalarmult\\crypto_scalarmult.c",
+            "line": 20,
+            "additionalContext": "scanoss:match,return crypto_scalarmult_curve25519(q, n, p);"
+          },
+          {
+            "location": "src\\nacl\\signing.py",
+            "line": 250,
+            "additionalContext": "scanoss:match,return _Curve25519_PrivateKey(raw_private)"
+          },
+          {
+            "location": "tests\\test_box.py",
+            "line": 54,
+            "additionalContext": "scanoss:match,PrivateKey.generate()"
+          },
+          {
+            "location": "tests\\test_box.py",
+            "line": 79,
+            "additionalContext": "scanoss:match,priv = PrivateKey( b\"5c2bee2d5be613ca82e377c96a0bf2220d823ce980cdff6279473edc52862798\", encoder=HexEncoder, )"
+          },
+          {
+            "location": "tests\\test_box.py",
+            "line": 83,
+            "additionalContext": "scanoss:match,Box(priv, pub)"
+          },
+          {
+            "location": "tests\\test_box.py",
+            "line": 91,
+            "additionalContext": "scanoss:match,priv = PrivateKey( b\"5c2bee2d5be613ca82e377c96a0bf2220d823ce980cdff6279473edc52862798\", encoder=HexEncoder, )"
+          },
+          {
+            "location": "tests\\test_box.py",
+            "line": 95,
+            "additionalContext": "scanoss:match,b1 = Box(priv, pub)"
+          },
+          {
+            "location": "tests\\test_box.py",
+            "line": 105,
+            "additionalContext": "scanoss:match,priv = PrivateKey( b\"5c2bee2d5be613ca82e377c96a0bf2220d823ce980cdff6279473edc52862798\", encoder=HexEncoder, )"
+          },
+          {
+            "location": "tests\\test_box.py",
+            "line": 109,
+            "additionalContext": "scanoss:match,b = Box(priv, pub)"
+          },
+          {
+            "location": "tests\\test_box.py",
+            "line": 135,
+            "additionalContext": "scanoss:match,privbob_decoded = PrivateKey(privbob, encoder=HexEncoder)"
+          },
+          {
+            "location": "tests\\test_box.py",
+            "line": 137,
+            "additionalContext": "scanoss:match,box = Box(privbob_decoded, pubalice_decoded)"
+          },
+          {
+            "location": "tests\\test_box.py",
+            "line": 175,
+            "additionalContext": "scanoss:match,privalice_decoded = PrivateKey(privalice, encoder=HexEncoder)"
+          },
+          {
+            "location": "tests\\test_box.py",
+            "line": 177,
+            "additionalContext": "scanoss:match,box = Box(privalice_decoded, pubbob_decoded)"
+          },
+          {
+            "location": "tests\\test_box.py",
+            "line": 209,
+            "additionalContext": "scanoss:match,privalice_decoded = PrivateKey(privalice, encoder=HexEncoder)"
+          },
+          {
+            "location": "tests\\test_box.py",
+            "line": 211,
+            "additionalContext": "scanoss:match,box = Box(privalice_decoded, pubbob_decoded)"
+          },
+          {
+            "location": "tests\\test_box.py",
+            "line": 243,
+            "additionalContext": "scanoss:match,privalice_decoded = PrivateKey(privalice, encoder=HexEncoder)"
+          },
+          {
+            "location": "tests\\test_box.py",
+            "line": 245,
+            "additionalContext": "scanoss:match,box = Box(privalice_decoded, pubbob_decoded)"
+          },
+          {
+            "location": "tests\\test_box.py",
+            "line": 276,
+            "additionalContext": "scanoss:match,privalice_decoded = PrivateKey(privalice, encoder=HexEncoder)"
+          },
+          {
+            "location": "tests\\test_box.py",
+            "line": 278,
+            "additionalContext": "scanoss:match,box = Box(privalice_decoded, pubbob_decoded)"
+          },
+          {
+            "location": "tests\\test_box.py",
+            "line": 313,
+            "additionalContext": "scanoss:match,privbob_decoded = PrivateKey(privbob, encoder=HexEncoder)"
+          },
+          {
+            "location": "tests\\test_box.py",
+            "line": 317,
+            "additionalContext": "scanoss:match,box = Box(privbob_decoded, pubbob_decoded)"
+          },
+          {
+            "location": "tests\\test_box.py",
+            "line": 328,
+            "additionalContext": "scanoss:match,PrivateKey(b\"\")"
+          },
+          {
+            "location": "tests\\test_box.py",
+            "line": 334,
+            "additionalContext": "scanoss:match,priv = PrivateKey( b\"5c2bee2d5be613ca82e377c96a0bf2220d823ce980cdff6279473edc52862798\", encoder=HexEncoder, )"
+          },
+          {
+            "location": "tests\\test_box.py",
+            "line": 338,
+            "additionalContext": "scanoss:match,b = Box(priv, pub)"
+          },
+          {
+            "location": "tests\\test_box.py",
+            "line": 346,
+            "additionalContext": "scanoss:match,priv = PrivateKey.generate()"
+          },
+          {
+            "location": "tests\\test_public.py",
+            "line": 54,
+            "additionalContext": "scanoss:match,k1 = PrivateKey(b\"\\x00\" * crypto_box_SECRETKEYBYTES)"
+          },
+          {
+            "location": "tests\\test_public.py",
+            "line": 55,
+            "additionalContext": "scanoss:match,k2 = PrivateKey(b\"\\x00\" * crypto_box_SECRETKEYBYTES)"
+          },
+          {
+            "location": "tests\\test_public.py",
+            "line": 60,
+            "additionalContext": "scanoss:match,k1 = PrivateKey(b\"\\x00\" * crypto_box_SECRETKEYBYTES)"
+          },
+          {
+            "location": "tests\\test_public.py",
+            "line": 61,
+            "additionalContext": "scanoss:match,k2 = PrivateKey(b\"\\x00\" * crypto_box_SECRETKEYBYTES)"
+          },
+          {
+            "location": "tests\\test_public.py",
+            "line": 76,
+            "additionalContext": "scanoss:match,sk1 = PrivateKey(bytes(rwk1))"
+          },
+          {
+            "location": "tests\\test_public.py",
+            "line": 77,
+            "additionalContext": "scanoss:match,sk2 = PrivateKey(bytes(rwk2))"
+          },
+          {
+            "location": "tests\\test_public.py",
+            "line": 91,
+            "additionalContext": "scanoss:match,sk = PrivateKey(random(crypto_box_SECRETKEYBYTES))"
+          },
+          {
+            "location": "tests\\test_public.py",
+            "line": 98,
+            "additionalContext": "scanoss:match,PrivateKey(b\"\\x01\" * crypto_box_SECRETKEYBYTES),"
+          },
+          {
+            "location": "tests\\test_public.py",
+            "line": 99,
+            "additionalContext": "scanoss:match,PrivateKey(b\"\\x00\" * (crypto_box_SECRETKEYBYTES - 1) + b\"\\x01\"),"
+          },
+          {
+            "location": "tests\\test_public.py",
+            "line": 103,
+            "additionalContext": "scanoss:match,k1 = PrivateKey(b\"\\x00\" * crypto_box_SECRETKEYBYTES)"
+          },
+          {
+            "location": "tests\\test_public.py",
+            "line": 139,
+            "additionalContext": "scanoss:match,alices = PrivateKey(binascii.unhexlify(prv_A))"
+          },
+          {
+            "location": "tests\\test_public.py",
+            "line": 140,
+            "additionalContext": "scanoss:match,bobs = PrivateKey(binascii.unhexlify(prv_B))"
+          },
+          {
+            "location": "tests\\test_public.py",
+            "line": 147,
+            "additionalContext": "scanoss:match,box_AB = Box(alices, bobsP)"
+          },
+          {
+            "location": "tests\\test_public.py",
+            "line": 148,
+            "additionalContext": "scanoss:match,box_BA = Box(bobs, alicesP)"
+          },
+          {
+            "location": "tests\\test_public.py",
+            "line": 153,
+            "additionalContext": "scanoss:match,alices = PrivateKey.generate()"
+          },
+          {
+            "location": "tests\\test_public.py",
+            "line": 160,
+            "additionalContext": "scanoss:match,box_AB = Box(alices, bobsP)"
+          },
+          {
+            "location": "tests\\test_public.py",
+            "line": 162,
+            "additionalContext": "scanoss:match,box_BA = Box(bobs, alicesP)"
+          },
+          {
+            "location": "tests\\test_public.py",
+            "line": 163,
+            "additionalContext": "scanoss:match,box_BprimeA = Box(bobsprime, alicesP)"
+          },
+          {
+            "location": "tests\\test_sealed_box.py",
+            "line": 45,
+            "additionalContext": "scanoss:match,PrivateKey.generate()"
+          },
+          {
+            "location": "tests\\test_sealed_box.py",
+            "line": 53,
+            "additionalContext": "scanoss:match,priv = PrivateKey( b\"5c2bee2d5be613ca82e377c96a0bf2220d823ce980cdff6279473edc52862798\", encoder=HexEncoder, )"
+          },
+          {
+            "location": "tests\\test_sealed_box.py",
+            "line": 68,
+            "additionalContext": "scanoss:match,privalice_decoded = PrivateKey(privalice, encoder=HexEncoder)"
+          },
+          {
+            "location": "tests\\test_sealed_box.py",
+            "line": 94,
+            "additionalContext": "scanoss:match,privalice_decoded = PrivateKey(privalice, encoder=HexEncoder)"
+          },
+          {
+            "location": "tests\\test_sealed_box.py",
+            "line": 105,
+            "additionalContext": "scanoss:match,priv = PrivateKey.generate()"
+          },
+          {
+            "location": "tests\\test_sealed_box.py",
+            "line": 142,
+            "additionalContext": "scanoss:match,k = PrivateKey.generate()"
+          },
+          {
+            "location": "tests\\test_sealed_box.py",
+            "line": 154,
+            "additionalContext": "scanoss:match,k = PrivateKey.generate()"
+          }
+        ]
+      },
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": {
+          "primitive": "key-agree",
+          "executionEnvironment": "software-plain-ram",
+          "implementationPlatform": "x86_64"
+        },
+        "oid": "1.3.101.110"
+      }
+    },
+    {
+      "bom-ref": "b84c0ac9-25b1-4654-a252-8cef5eba70a0",
+      "type": "cryptographic-asset",
+      "name": "XSalsa20-Poly1305",
+      "properties": [
+        {
+          "name": "scanoss:cryptoFunction",
+          "value": "encrypt"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "name",
+            "confidence": 1,
+            "methods": [
+              {
+                "technique": "source-code-analysis",
+                "confidence": 1,
+                "value": "scanoss:ruleid,C.msys64.tmp.run-3725971275.Users.smili..scanoss.crypto-finder.cache.rulesets.dca.latest.semgrep-rules.python.pynacl.algorithm.ae.xsalsa20-poly1305.python.pynacl.algorithm.ae.xsalsa20-poly1305.secret-box"
+              }
+            ]
+          }
+        ],
+        "occurrences": [
+          {
+            "location": "tests\\test_encoding.py",
+            "line": 78,
+            "additionalContext": "scanoss:match,box = nacl.secret.SecretBox(KEY)"
+          },
+          {
+            "location": "tests\\test_secret.py",
+            "line": 83,
+            "additionalContext": "scanoss:match,SecretBox(k, encoder=HexEncoder)"
+          },
+          {
+            "location": "tests\\test_secret.py",
+            "line": 88,
+            "additionalContext": "scanoss:match,s = SecretBox(k, encoder=HexEncoder)"
+          },
+          {
+            "location": "tests\\test_secret.py",
+            "line": 117,
+            "additionalContext": "scanoss:match,box = SecretBox(key, encoder=HexEncoder)"
+          },
+          {
+            "location": "tests\\test_secret.py",
+            "line": 141,
+            "additionalContext": "scanoss:match,box = SecretBox(key, encoder=HexEncoder)"
+          },
+          {
+            "location": "tests\\test_secret.py",
+            "line": 159,
+            "additionalContext": "scanoss:match,box = SecretBox(key, encoder=HexEncoder)"
+          },
+          {
+            "location": "tests\\test_secret.py",
+            "line": 177,
+            "additionalContext": "scanoss:match,box = SecretBox(key, encoder=HexEncoder)"
+          },
+          {
+            "location": "tests\\test_secret.py",
+            "line": 194,
+            "additionalContext": "scanoss:match,box = SecretBox(key, encoder=HexEncoder)"
+          },
+          {
+            "location": "tests\\test_secret.py",
+            "line": 236,
+            "additionalContext": "scanoss:match,SecretBox(key)"
+          },
+          {
+            "location": "tests\\test_secret.py",
+            "line": 260,
+            "additionalContext": "scanoss:match,box = SecretBox(b\"11\" * 32, encoder=HexEncoder)"
+          },
+          {
+            "location": "tests\\test_secret.py",
+            "line": 293,
+            "additionalContext": "scanoss:match,box = SecretBox(b\"\\x11\" * 32)"
+          },
+          {
+            "location": "tests\\test_utils.py",
+            "line": 31,
+            "additionalContext": "scanoss:match,assert str(nacl.secret.SecretBox(b\"\\x00\" * 32)) == str(b\"\\x00\" * 32)"
+          }
+        ]
+      },
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": {
+          "primitive": "ae",
+          "executionEnvironment": "software-plain-ram",
+          "implementationPlatform": "x86_64",
+          "cryptoFunctions": [
+            "encrypt"
+          ]
+        }
+      }
+    },
+    {
+      "bom-ref": "f0ca3368-33bb-4500-b0dc-d073efe89850",
+      "type": "cryptographic-asset",
+      "name": "private-key",
+      "description": "Cryptographic private-key",
+      "evidence": {
+        "identity": [
+          {
+            "field": "name",
+            "confidence": 1,
+            "methods": [
+              {
+                "technique": "source-code-analysis",
+                "confidence": 1,
+                "value": "scanoss:ruleid,C.msys64.tmp.run-3725971275.Users.smili..scanoss.crypto-finder.cache.rulesets.dca.latest.semgrep-rules.python.ecdsa.related-crypto-material.private-key.python.ecdsa.related-crypto-material.private-key.signing-key-generate-default-curve"
+              }
+            ]
+          }
+        ],
+        "occurrences": [
+          {
+            "location": "tests\\test_signing.py",
+            "line": 56,
+            "additionalContext": "scanoss:match,SigningKey.generate()"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 189,
+            "additionalContext": "scanoss:match,skey = SigningKey.generate()"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 204,
+            "additionalContext": "scanoss:match,skey = SigningKey.generate()"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 222,
+            "additionalContext": "scanoss:match,sk = SigningKey.generate()"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 239,
+            "additionalContext": "scanoss:match,sk = SigningKey.generate()"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 275,
+            "additionalContext": "scanoss:match,sk = SigningKey.generate()"
+          }
+        ]
+      },
+      "cryptoProperties": {
+        "assetType": "related-crypto-material",
+        "relatedCryptoMaterialProperties": {
+          "type": "private-key"
+        }
+      }
+    },
+    {
+      "bom-ref": "0d6d9885-6947-49de-b553-77bd64683cc4",
+      "type": "cryptographic-asset",
+      "name": "scrypt",
+      "properties": [
+        {
+          "name": "scanoss:cryptoFunction",
+          "value": "keyderive"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "name",
+            "confidence": 1,
+            "methods": [
+              {
+                "technique": "source-code-analysis",
+                "confidence": 1,
+                "value": "scanoss:ruleid,C.msys64.tmp.run-3725971275.Users.smili..scanoss.crypto-finder.cache.rulesets.dca.latest.semgrep-rules.python.pynacl.algorithm.kdf.argon2.python.pynacl.algorithm.kdf.scrypt.kdf"
+              }
+            ]
+          },
+          {
+            "field": "name",
+            "confidence": 1,
+            "methods": [
+              {
+                "technique": "source-code-analysis",
+                "confidence": 1,
+                "value": "scanoss:ruleid,C.msys64.tmp.run-3725971275.Users.smili..scanoss.crypto-finder.cache.rulesets.dca.latest.semgrep-rules.python.pynacl.algorithm.kdf.argon2.python.pynacl.algorithm.kdf.scrypt.str"
+              }
+            ]
+          }
+        ],
+        "occurrences": [
+          {
+            "location": "tests\\test_pwhash.py",
+            "line": 284,
+            "additionalContext": "scanoss:match,res = nacl.pwhash.scrypt.kdf(size, password, salt, opslimit, memlimit)"
+          },
+          {
+            "location": "tests\\test_pwhash.py",
+            "line": 295,
+            "additionalContext": "scanoss:match,h1 = nacl.pwhash.scrypt.str(password)"
+          },
+          {
+            "location": "tests\\test_pwhash.py",
+            "line": 296,
+            "additionalContext": "scanoss:match,h2 = nacl.pwhash.scrypt.str(password)"
+          },
+          {
+            "location": "tests\\test_pwhash.py",
+            "line": 308,
+            "additionalContext": "scanoss:match,nacl.pwhash.scrypt.str(password), password"
+          },
+          {
+            "location": "tests\\test_pwhash.py",
+            "line": 321,
+            "additionalContext": "scanoss:match,nacl.pwhash.scrypt.str(password), password.replace(b\"dog\", b\"cat\")"
+          },
+          {
+            "location": "tests\\test_pwhash.py",
+            "line": 344,
+            "additionalContext": "scanoss:match,nacl.pwhash.scrypt.kdf(size, password, salt, opslimit, memlimit)"
+          },
+          {
+            "location": "tests\\test_pwhash.py",
+            "line": 383,
+            "additionalContext": "scanoss:match,nacl.pwhash.scrypt.kdf(size, password, salt, opslimit, memlimit)"
+          },
+          {
+            "location": "tests\\test_pwhash.py",
+            "line": 515,
+            "additionalContext": "scanoss:match,scrypt_hash = nacl.pwhash.scrypt.str( _psw, opslimit=nacl.pwhash.scrypt.OPSLIMIT_INTERACTIVE, memlimit=nacl.pwhash.scrypt.MEMLIMIT_INTERACTIVE, )"
+          },
+          {
+            "location": "tests\\test_pwhash.py",
+            "line": 670,
+            "additionalContext": "scanoss:match,nacl.pwhash.scrypt.kdf(0, empty, empty)"
+          },
+          {
+            "location": "tests\\test_pwhash.py",
+            "line": 672,
+            "additionalContext": "scanoss:match,nacl.pwhash.scrypt.str(empty)"
+          }
+        ]
+      },
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": {
+          "primitive": "kdf",
+          "executionEnvironment": "software-plain-ram",
+          "implementationPlatform": "x86_64",
+          "cryptoFunctions": [
+            "keyderive"
+          ]
+        },
+        "oid": "1.3.6.1.4.1.11591.4.11"
+      }
+    },
+    {
+      "bom-ref": "8080970a-beac-45c3-9e06-769bcc737b8d",
+      "type": "cryptographic-asset",
+      "name": "signature",
+      "description": "Cryptographic signature",
+      "evidence": {
+        "identity": [
+          {
+            "field": "name",
+            "confidence": 1,
+            "methods": [
+              {
+                "technique": "source-code-analysis",
+                "confidence": 1,
+                "value": "scanoss:ruleid,C.msys64.tmp.run-3725971275.Users.smili..scanoss.crypto-finder.cache.rulesets.dca.latest.semgrep-rules.python.ecdsa.related-crypto-material.signature.python.ecdsa.related-crypto-material.signature.sign-output"
+              }
+            ]
+          }
+        ],
+        "occurrences": [
+          {
+            "location": "tests\\test_signing.py",
+            "line": 190,
+            "additionalContext": "scanoss:match,smessage = skey.sign(b\"A Test Message!\")"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 206,
+            "additionalContext": "scanoss:match,signature = skey.sign(message).signature"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 225,
+            "additionalContext": "scanoss:match,smsg = sk.sign(b\"Hello World in base64\", encoder=Base64Encoder)"
+          },
+          {
+            "location": "tests\\test_signing.py",
+            "line": 242,
+            "additionalContext": "scanoss:match,smsg = sk.sign(b\"Hello World in hex\", encoder=HexEncoder)"
+          }
+        ]
+      },
+      "cryptoProperties": {
+        "assetType": "related-crypto-material",
+        "relatedCryptoMaterialProperties": {
+          "type": "signature"
+        }
+      }
+    }
+  ]
+}
